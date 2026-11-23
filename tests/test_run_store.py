@@ -192,3 +192,55 @@ def test_an_unknown_field_is_rejected_on_reading(tmp_path: Path):
 
     with pytest.raises(RunStoreError, match=r"run\.json"):
         read_run(path)
+
+
+def test_another_schema_version_is_rejected(tmp_path: Path):
+    path = tmp_path / "run.json"
+    write_run(path, make_info(), make_result())
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["schema_version"] = 1
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(RunStoreError, match="schema version 1 is not supported"):
+        read_run(path)
+
+
+def test_a_missing_file_is_a_store_error(tmp_path: Path):
+    with pytest.raises(RunStoreError, match="nope.json"):
+        read_run(tmp_path / "nope.json")
+
+
+def test_a_remote_run_is_priced_on_the_estimate_and_keeps_the_reported_count(tmp_path: Path):
+    path = tmp_path / "cloud.json"
+    estimates = {"a": 500, "b": 500, "c": 500}  # reported is 1,000 each
+
+    billed = write_run(
+        path, make_info(endpoint="remote", price_in=1.0, price_out=0.0), make_result(), estimates
+    )
+    record = read_run(path)
+
+    assert billed == 1500
+    assert record.totals.input_tokens == 3000  # what the endpoint reported, kept for reference
+    assert (record.totals.input_tokens_estimated, record.totals.input_tokens_billed) == (1500, 1500)
+    assert record.totals.cost_usd == pytest.approx(0.0015)
+
+
+def test_a_remote_run_cannot_be_written_without_estimates(tmp_path: Path):
+    with pytest.raises(ValueError, match="estimated input tokens"):
+        write_run(tmp_path / "cloud.json", make_info(endpoint="remote"), make_result())
+
+
+def test_a_local_run_is_priced_on_its_reported_count_even_with_estimates(tmp_path: Path):
+    path = tmp_path / "local.json"
+
+    billed = write_run(
+        path, make_info(price_in=1.0, price_out=0.0), make_result(), {"a": 1, "b": 1, "c": 1}
+    )
+
+    assert billed == 3000
+    assert read_run(path).totals.cost_usd == pytest.approx(0.003)
+
+
+def test_a_missing_estimate_for_a_scored_case_is_refused(tmp_path: Path):
+    with pytest.raises(ValueError, match="no input token estimate for: c"):
+        write_run(tmp_path / "x.json", make_info(), make_result(), {"a": 1, "b": 1})
