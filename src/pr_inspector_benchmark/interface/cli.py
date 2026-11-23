@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.console import Console
 
 from pr_inspector_benchmark import __version__
 from pr_inspector_benchmark.application.use_cases.run_benchmark import RunBenchmarkUseCase
@@ -28,8 +29,9 @@ from pr_inspector_benchmark.infrastructure.pr_inspector_reviewer import (
     build_reviewer,
     is_local_endpoint,
 )
-from pr_inspector_benchmark.infrastructure.run_store import write_run
+from pr_inspector_benchmark.infrastructure.run_store import RunStoreError, read_run, write_run
 from pr_inspector_benchmark.infrastructure.token_estimate import estimate_input_tokens
+from pr_inspector_benchmark.interface.comparison import build_comparison, to_markdown, to_rich
 from pr_inspector_benchmark.interface.formatting import case_line, run_summary
 
 app = typer.Typer(
@@ -214,3 +216,43 @@ def run(
 
     billed = write_run(target, info, result, estimates)
     typer.echo(run_summary(info, result, str(target), billed))
+
+
+@app.command("compare")
+def compare(
+    files: Annotated[list[Path], typer.Argument(help="Result files written by `pr-bench run`.")],
+    markdown: Annotated[
+        Path | None, typer.Option("--markdown", help="Also write the tables as Markdown.")
+    ] = None,
+    price_in: Annotated[
+        float | None,
+        typer.Option(min=0, help="Reprice every run: USD per million input tokens."),
+    ] = None,
+    price_out: Annotated[
+        float | None,
+        typer.Option(min=0, help="Reprice every run: USD per million output tokens."),
+    ] = None,
+) -> None:
+    """Put saved runs side by side."""
+    try:
+        runs = [read_run(path) for path in files]
+    except RunStoreError as exc:
+        raise _fail(str(exc)) from exc
+    labels = [run.label for run in runs]
+    if len(set(labels)) != len(labels):
+        raise _fail(
+            f"two of the runs have the same label, so their columns would be ambiguous: {labels}"
+        )
+
+    if (price_in is None) != (price_out is None):
+        raise _fail("give both --price-in and --price-out, or neither")
+    comparison = build_comparison(runs, price_in=price_in, price_out=price_out)
+    console = Console()
+    for table in to_rich(comparison):
+        console.print(table)
+    for note in comparison.notes:
+        typer.echo(note)
+    if markdown is not None:
+        markdown.parent.mkdir(parents=True, exist_ok=True)
+        markdown.write_text(to_markdown(comparison), encoding="utf-8")
+        typer.echo(f"wrote {markdown}")
