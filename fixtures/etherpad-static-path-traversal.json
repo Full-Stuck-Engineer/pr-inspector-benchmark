@@ -1,0 +1,27 @@
+{
+  "id": "etherpad-static-path-traversal",
+  "description": "The /static plugin handler converts backslashes to slashes on every platform, after the traversal sanitizer has already run.",
+  "language": "typescript",
+  "context": "needs_context",
+  "provenance": {
+    "repository": "ether/etherpad",
+    "license": "Apache-2.0",
+    "reference": "9c8d16d50e2fdfd9693ab35c43280410cb4db2fc",
+    "url": "https://github.com/ether/etherpad/commit/9c8d16d50e2fdfd9693ab35c43280410cb4db2fc",
+    "construction": "reverse of 9c8d16d50e: the new side of the diff is the code before the change; 11 explanatory line(s) deleted from the old side were dropped so the diff does not explain the fix",
+    "advisory": "GHSA-mc8w-wjhw-45x5"
+  },
+  "expected": {
+    "risk_level": "CRITICAL",
+    "rationale": "On POSIX a backslash is an ordinary filename byte, so the sanitizer deliberately leaves '..\\\\' sequences alone. Turning every backslash into '/' afterwards recreates '../' path components, so an unauthenticated request can read files outside the plugin directory. The comment says the conversion is safe, which is only true on Windows, and seeing the problem needs knowledge of what the sanitizer does. GitHub rated the advisory critical (pre-auth arbitrary file read).",
+    "issues": [
+      {
+        "file_path": "src/node/utils/Minify.ts",
+        "line_start": 179,
+        "line_end": 186,
+        "description": "filename.replace(/\\\\/g, '/') runs on every platform after sanitizePathname, so backslash sequences become '../' components and the joined path can leave the plugin directory."
+      }
+    ]
+  },
+  "diff": "diff --git a/src/node/utils/Minify.ts b/src/node/utils/Minify.ts\nindex daf56fb..68e2146 100644\n--- a/src/node/utils/Minify.ts\n+++ b/src/node/utils/Minify.ts\n@@ -177,7 +177,13 @@ const _minify = async (req:any, res:any) => {\n       const plugin = plugins.plugins[library];\n       const pluginPath = plugin.package.realPath;\n       filename = path.join(pluginPath, libraryPath);\n-      if (path.sep === '\\\\') filename = filename.replace(/\\\\/g, '/');\n+      // On Windows, path.relative converts forward slashes to backslashes. Convert them back\n+      // because some of the code below assumes forward slashes. Node.js treats both the backlash\n+      // and the forward slash characters as pathname component separators on Windows so this does\n+      // not change the meaning of the pathname. This conversion does not introduce a directory\n+      // traversal vulnerability because all '..\\\\' substrings have already been removed by\n+      // sanitizePathname.\n+      filename = filename.replace(/\\\\/g, '/');\n     } else if (LIBRARY_WHITELIST.indexOf(library) !== -1) {\n       // Go straight into node_modules\n       // Avoid `require.resolve()`, since 'mustache' and 'mustache/index.js'\n"
+}

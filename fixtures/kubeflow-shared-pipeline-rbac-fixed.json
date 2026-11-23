@@ -1,0 +1,20 @@
+{
+  "id": "kubeflow-shared-pipeline-rbac-fixed",
+  "description": "The upstream fix itself: write operations on shared pipelines are authorized against the system namespace.",
+  "language": "go",
+  "context": "in_diff",
+  "provenance": {
+    "repository": "kubeflow/pipelines",
+    "license": "Apache-2.0",
+    "reference": "186dd1f3b0403af841c9b4ea7ab94f405339ef6c",
+    "url": "https://github.com/kubeflow/pipelines/commit/186dd1f3b0403af841c9b4ea7ab94f405339ef6c",
+    "construction": "186dd1f3b0 as merged: the diff is the fix itself, so it carries the safeguard that the reversed fixture removes; used as a control with no defect",
+    "advisory": "GHSA-ghgh-57qv-h687"
+  },
+  "expected": {
+    "risk_level": "LOW",
+    "rationale": "This is the fix commit as merged, so it contains the safeguard that its reversed counterpart, kubeflow-shared-pipeline-rbac, removes. A good review has nothing to report, and a reviewer that flags this fix while flagging its reversal has not really told the two apart.",
+    "issues": []
+  },
+  "diff": "diff --git a/backend/src/apiserver/server/pipeline_server.go b/backend/src/apiserver/server/pipeline_server.go\nindex e41b3ae..cbd21e4 100644\n--- a/backend/src/apiserver/server/pipeline_server.go\n+++ b/backend/src/apiserver/server/pipeline_server.go\n@@ -1262,8 +1262,21 @@ func (s *BasePipelineServer) canAccessPipeline(ctx context.Context, pipelineId s\n \t\t\tresourceAttributes.Name = pipeline.Name\n \t\t}\n \t}\n-\t// Skip authentication if the namespace is empty to enable shared pipelines in multi-user mode\n+\t// Skip authorization for read-only operations on shared pipelines in multi-user mode.\n+\t// Write operations (create, update, delete) on shared pipelines must still be authorized\n+\t// against the KFP system namespace, since shared pipelines have no namespace of their own.\n \tif s.resourceManager.IsEmptyNamespace(resourceAttributes.Namespace) {\n+\t\tif resourceAttributes.Verb == common.RbacResourceVerbGet || resourceAttributes.Verb == common.RbacResourceVerbList {\n+\t\t\treturn nil\n+\t\t}\n+\t\tresourceAttributes.Namespace = common.GetPodNamespace()\n+\t\tresourceAttributes.Group = common.RbacPipelinesGroup\n+\t\tresourceAttributes.Version = common.RbacPipelinesVersion\n+\t\tresourceAttributes.Resource = common.RbacResourceTypePipelines\n+\t\terr := s.resourceManager.IsAuthorized(ctx, resourceAttributes)\n+\t\tif err != nil {\n+\t\t\treturn util.Wrapf(err, \"Failed to access shared pipeline %s. Check if you have permission to %s shared pipelines\", pipelineId, resourceAttributes.Verb)\n+\t\t}\n \t\treturn nil\n \t}\n \tresourceAttributes.Group = common.RbacPipelinesGroup\n"
+}

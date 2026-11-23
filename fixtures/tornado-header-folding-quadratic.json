@@ -1,0 +1,27 @@
+{
+  "id": "tornado-header-folding-quadratic",
+  "description": "Header line folding is supported by validating each continuation line and appending it to the previous header value one at a time.",
+  "language": "python",
+  "context": "in_diff",
+  "provenance": {
+    "repository": "tornadoweb/tornado",
+    "license": "Apache-2.0",
+    "reference": "1b7a1dc9f340f52de929852e8125aa12f25297c9",
+    "url": "https://github.com/tornadoweb/tornado/commit/1b7a1dc9f340f52de929852e8125aa12f25297c9",
+    "construction": "reverse of 1b7a1dc9f3: the new side of the diff is the code before the change; 4 explanatory line(s) deleted from the old side were dropped so the diff does not explain the fix",
+    "advisory": "GHSA-pcg2-g6cj-q92c"
+  },
+  "expected": {
+    "risk_level": "MEDIUM",
+    "rationale": "Each continuation line is validated and concatenated onto the last header value, which copies the growing string every time, so a request made of very many tiny continuation lines costs quadratic CPU. GitHub rated the advisory medium (CWE-407, CWE-770).",
+    "issues": [
+      {
+        "file_path": "tornado/httputil.py",
+        "line_start": 262,
+        "line_end": 274,
+        "description": "Every continuation line is appended to the last header value with +=, re-copying the growing string, with no limit on how many continuation lines a header can have."
+      }
+    ]
+  },
+  "diff": "diff --git a/tornado/httputil.py b/tornado/httputil.py\nindex 7cdacc8..97e15c1 100644\n--- a/tornado/httputil.py\n+++ b/tornado/httputil.py\n@@ -184,6 +184,7 @@ class HTTPHeaders(collections.abc.MutableMapping[str, str]):\n         # on demand (and cleared whenever the list is modified).\n         self._as_list: dict[str, list[str]] = {}\n         self._combined_cache: dict[str, str] = {}\n+        self._last_key: str | None = None\n         if len(args) == 1 and len(kwargs) == 0 and isinstance(args[0], HTTPHeaders):\n             # Copy constructor\n             for k, v in args[0].get_all():\n@@ -207,6 +208,7 @@ class HTTPHeaders(collections.abc.MutableMapping[str, str]):\n             if _FORBIDDEN_HEADER_CHARS_RE.search(value):\n                 raise HTTPInputError(\"Invalid header value %r\" % value)\n         norm_name = _normalize_header(name)\n+        self._last_key = norm_name\n         if norm_name in self:\n             self._combined_cache.pop(norm_name, None)\n             self._as_list[norm_name].append(value)\n@@ -247,7 +249,6 @@ class HTTPHeaders(collections.abc.MutableMapping[str, str]):\n            In Tornado 7.0, certain deprecated features of HTTP will become errors.\n            Specifically, line folding and the use of LF (with CR) as a line separator\n            will be removed.\n-\n         \"\"\"\n         if m := re.search(r\"\\r?\\n$\", line):\n             # RFC 9112 section 2.2: a recipient MAY recognize a single LF as a line\n@@ -258,14 +259,27 @@ class HTTPHeaders(collections.abc.MutableMapping[str, str]):\n             # Empty line, or the final CRLF of a header block.\n             return\n         if line[0] in HTTP_WHITESPACE:\n-            raise HTTPInputError(\n-                \"header line cannot start with whitespace, folding not supported\"\n+            # continuation of a multi-line header\n+            # TODO(7.0): Remove support for line folding.\n+            if self._last_key is None:\n+                raise HTTPInputError(\"first header line cannot start with whitespace\")\n+            new_part = \" \" + line.strip(HTTP_WHITESPACE)\n+            if _chars_are_bytes:\n+                if not _ABNF.field_value.fullmatch(new_part[1:]):\n+                    raise HTTPInputError(\"Invalid header continuation %r\" % new_part)\n+            else:\n+                if _FORBIDDEN_HEADER_CHARS_RE.search(new_part):\n+                    raise HTTPInputError(\"Invalid header value %r\" % new_part)\n+            self._as_list[self._last_key][-1] += new_part\n+            self._combined_cache.pop(self._last_key, None)\n+        else:\n+            try:\n+                name, value = line.split(\":\", 1)\n+            except ValueError:\n+                raise HTTPInputError(\"no colon in header line\")\n+            self.add(\n+                name, value.strip(HTTP_WHITESPACE), _chars_are_bytes=_chars_are_bytes\n             )\n-        try:\n-            name, value = line.split(\":\", 1)\n-        except ValueError:\n-            raise HTTPInputError(\"no colon in header line\")\n-        self.add(name, value.strip(HTTP_WHITESPACE), _chars_are_bytes=_chars_are_bytes)\n \n     @classmethod\n     def parse(cls, headers: str, *, _chars_are_bytes: bool = True) -> HTTPHeaders:\n"
+}

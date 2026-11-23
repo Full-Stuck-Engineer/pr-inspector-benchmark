@@ -1,0 +1,20 @@
+{
+  "id": "wllama-test-layout-refactor",
+  "description": "Vitest include and exclude globs for the test files.",
+  "language": "typescript",
+  "context": "in_diff",
+  "provenance": {
+    "repository": "ngxson/wllama",
+    "license": "MIT",
+    "reference": "PR #350 (merge commit b5e8664f14ef97ee6b251c6656f34068cf8750d2)",
+    "url": "https://github.com/ngxson/wllama/pull/350",
+    "construction": "reverse of b5e8664f14: the new side of the diff is the code before the change; 1 explanatory line(s) deleted from the old side were dropped so the diff does not explain the fix",
+    "advisory": null
+  },
+  "expected": {
+    "risk_level": "LOW",
+    "rationale": "A configuration-only change that points the test globs at a different directory layout. It changes no runtime behaviour of the library, so a good review has nothing to report.",
+    "issues": []
+  },
+  "diff": "diff --git a/vitest.config.ts b/vitest.config.ts\nindex 24c270a..c021de3 100644\n--- a/vitest.config.ts\n+++ b/vitest.config.ts\n@@ -4,6 +4,7 @@ const SAFARI = process.env.BROWSER === 'safari';\n const WEBGPU = process.env.WEBGPU === '1';\n const AUTO = process.env.AUTO === '1';\n const HEADED = process.env.HEADED === '1';\n+// run src/wllama.test.ts on the compat build (asyncify), see vitest.setup.ts\n const COMPAT = process.env.COMPAT === '1';\n \n const chromeArgsCI = ['disable-gpu', 'no-sandbox', 'disable-setuid-sandbox'];\n@@ -28,13 +29,13 @@ export default defineConfig({\n       '**/esm/**',\n       '**/docs/**',\n       '**/examples/**',\n-      ...(!WEBGPU ? ['**/src/testing/*.wgpu.test.*'] : []),\n+      ...(!WEBGPU ? ['**/src/*.wgpu.test.*'] : []),\n     ],\n     include: WEBGPU\n-      ? ['**/src/testing/*.wgpu.test.*']\n+      ? ['**/src/*.wgpu.test.*']\n       : COMPAT\n-        ? ['**/src/testing/wllama.test.*']\n-        : ['**/src/testing/*.test.*'],\n+        ? ['**/src/wllama.test.*']\n+        : ['**/src/**/*.test.*'],\n     browser: {\n       enabled: true,\n       name: process.env.BROWSER ?? 'chromium',\n"
+}
