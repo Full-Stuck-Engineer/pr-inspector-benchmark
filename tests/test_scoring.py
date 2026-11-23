@@ -10,7 +10,7 @@ from pr_inspector_benchmark.domain.entities import (
     RiskLevel,
 )
 from pr_inspector_benchmark.domain.results import ReportedIssue, ReviewOutcome
-from pr_inspector_benchmark.domain.scoring import score_case
+from pr_inspector_benchmark.domain.scoring import score_case, summarize
 
 PATH = "app/db.py"
 LOW, MEDIUM, HIGH, CRITICAL = (
@@ -175,3 +175,69 @@ def test_every_report_on_a_control_is_a_false_positive():
 
     assert score.false_positives == 2
     assert score.risk_near is True
+
+
+# --- summary ------------------------------------------------------------------------------
+
+
+def test_empty_run_has_counts_of_zero_and_no_rates():
+    summary = summarize([])
+
+    assert summary.cases == 0
+    assert summary.risk_accuracy is None
+    assert summary.risk_near_accuracy is None
+    assert summary.issue_recall is None
+    assert summary.precision is None
+    assert summary.control_false_positive_rate is None
+    assert summary.by_context == {}
+
+
+def test_summary_pools_four_cases():
+    scores = [
+        # exact risk, 1 of 1 found, one extra report
+        score_case(make_case((10, 12), case_id="a"), outcome(reported(11), reported(99))),
+        # two levels under-estimated, 1 of 2 found
+        score_case(
+            make_case((5, 5), (20, 25), risk=CRITICAL, context=ContextNeeded.NEEDS_CONTEXT),
+            outcome(reported(5), risk=MEDIUM),
+        ),
+        # control that drew a false report
+        score_case(make_case(case_id="c"), outcome(reported(3), risk=LOW)),
+        # clean control
+        score_case(make_case(case_id="d"), outcome(risk=LOW)),
+    ]
+
+    summary = summarize(scores)
+
+    assert summary.cases == 4
+    assert (summary.risk_exact_cases, summary.risk_near_cases) == (3, 3)
+    assert summary.risk_accuracy == 0.75
+    assert summary.risk_near_accuracy == 0.75
+    assert (summary.expected_issues, summary.found_issues) == (3, 2)
+    assert summary.issue_recall == pytest.approx(2 / 3)
+    assert (summary.reported_issues, summary.matched_reports) == (4, 2)
+    assert summary.precision == 0.5
+    assert summary.false_positives == 2
+    assert (summary.control_cases, summary.controls_with_reports) == (2, 1)
+    assert summary.control_false_positive_rate == 0.5
+
+
+def test_summary_breaks_recall_down_by_context_and_leaves_controls_out():
+    scores = [
+        score_case(make_case((10, 12)), outcome(reported(11))),
+        score_case(
+            make_case((5, 5), (20, 25), context=ContextNeeded.NEEDS_CONTEXT),
+            outcome(reported(5)),
+        ),
+        score_case(make_case(context=ContextNeeded.REMOVED_CHECK), outcome(risk=LOW)),
+    ]
+
+    by_context = summarize(scores).by_context
+
+    assert set(by_context) == {ContextNeeded.IN_DIFF, ContextNeeded.NEEDS_CONTEXT}
+    assert by_context[ContextNeeded.IN_DIFF].recall == 1.0
+    assert by_context[ContextNeeded.NEEDS_CONTEXT].recall == 0.5
+    assert (
+        by_context[ContextNeeded.NEEDS_CONTEXT].found,
+        by_context[ContextNeeded.NEEDS_CONTEXT].expected,
+    ) == (1, 2)
