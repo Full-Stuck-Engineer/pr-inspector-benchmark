@@ -40,9 +40,17 @@ class ContextNeeded(StrEnum):
     NEEDS_CONTEXT = "needs_context"  # needs knowledge of code outside the diff
 
 
+def is_valid_case_id(text: str) -> bool:
+    """Whether ``text`` is a lowercase slug, safe both as an id and as a file name."""
+    return _ID_PATTERN.fullmatch(text) is not None
+
+
 def _require_text(value: str, name: str) -> None:
     if not value.strip():
         raise InvalidFixtureError(f"{name} must not be blank")
+    if value.lstrip().startswith("TODO:"):
+        # The fixture builder writes these; a fixture is not finished until a human replaces them.
+        raise InvalidFixtureError(f"{name} is still a TODO placeholder; fill it in")
 
 
 @dataclass(frozen=True)
@@ -95,7 +103,7 @@ class BenchmarkCase:
     expected_issues: tuple[ExpectedIssue, ...] = ()
 
     def __post_init__(self) -> None:
-        if not _ID_PATTERN.fullmatch(self.id):
+        if not is_valid_case_id(self.id):
             raise InvalidFixtureError(
                 f"id {self.id!r} must be a lowercase slug (letters, digits, '-' and '_')"
             )
