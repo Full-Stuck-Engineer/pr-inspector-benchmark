@@ -11,6 +11,7 @@ from pr_inspector_benchmark.domain.entities import (
     ExpectedIssue,
     Provenance,
     RiskLevel,
+    is_valid_case_id,
 )
 from pr_inspector_benchmark.domain.exceptions import InvalidFixtureError
 
@@ -112,3 +113,34 @@ def test_risk_levels_are_ordered_from_low_to_critical():
     ordered = sorted(RiskLevel, key=RISK_ORDER.__getitem__)
 
     assert ordered == [RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL]
+
+
+@pytest.mark.parametrize("good", ["sql-injection", "a", "0day_fix", "cobra-stderr-routing"])
+def test_valid_case_ids_are_slugs(good: str):
+    assert is_valid_case_id(good) is True
+
+
+@pytest.mark.parametrize("bad", ["", "../escape", "a/b", "Upper", "has space", "-lead", "dot.ted"])
+def test_ids_that_could_escape_a_directory_or_break_a_name_are_invalid(bad: str):
+    assert is_valid_case_id(bad) is False
+
+
+@pytest.mark.parametrize("field", ["description", "rationale"])
+def test_text_still_marked_todo_is_rejected(field: str):
+    with pytest.raises(InvalidFixtureError, match="TODO placeholder"):
+        make_case(**{field: "TODO: describe the change"})
+
+
+def test_expected_issue_and_provenance_text_still_marked_todo_is_rejected():
+    with pytest.raises(InvalidFixtureError, match="TODO placeholder"):
+        make_issue(description="TODO: what a good review should report")
+    with pytest.raises(InvalidFixtureError, match="TODO placeholder"):
+        make_provenance(license="TODO: license")
+
+
+def test_ordinary_text_that_merely_contains_todo_is_fine():
+    assert make_case(description="A todo list parser drops empty lines").id
+
+
+def test_todo_must_be_written_as_the_marker_to_count():
+    assert make_case(rationale="TODOs in the parser are ignored").id
