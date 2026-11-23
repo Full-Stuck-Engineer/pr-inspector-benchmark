@@ -69,6 +69,12 @@ def build_fixture(
         "fixtures"
     ),
     force: Annotated[bool, typer.Option(help="Overwrite an existing fixture.")] = False,
+    keep_comments: Annotated[
+        bool, typer.Option(help="Keep the fix's explanatory comments in the diff (they leak it).")
+    ] = False,
+    also_drop: Annotated[
+        str | None, typer.Option(help="Also drop deleted lines matching this regex (e.g. prose).")
+    ] = None,
 ) -> None:
     """Write a fixture skeleton: the reversed fix, with TODO placeholders to fill in."""
     if not is_valid_case_id(fixture_id):
@@ -77,7 +83,9 @@ def build_fixture(
     if target.exists() and not force:
         raise _fail(f"{target} already exists; pass --force to overwrite it")
     try:
-        change = create_change_source().fetch_reversed_change(repo, commit, base)
+        change = create_change_source().fetch_reversed_change(
+            repo, commit, base, drop_comments=not keep_comments, also_drop=also_drop
+        )
     except FixtureBuildError as exc:
         raise _fail(str(exc)) from exc
 
@@ -93,4 +101,6 @@ def build_fixture(
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
     typer.echo(f"wrote {target} ({len(change.files)} source file(s))")
+    if change.dropped_lines:
+        typer.echo(f"dropped {change.dropped_lines} explanatory line(s) from the old side")
     typer.echo("Fill in every TODO field, then check it with the loader.")

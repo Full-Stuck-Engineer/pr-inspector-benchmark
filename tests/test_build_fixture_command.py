@@ -119,9 +119,13 @@ class FakeSource:
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
         self.calls: list[tuple[str, str, str | None]] = []
+        self.options: dict = {}
 
-    def fetch_reversed_change(self, repository: str, commit: str, base: str | None = None):
+    def fetch_reversed_change(
+        self, repository: str, commit: str, base: str | None = None, **options
+    ):
         self.calls.append((repository, commit, base))
+        self.options = options
         if self.error:
             raise self.error
         return ReversedChange(diff="diff --git a/app/db.py b/app/db.py\n", files=("app/db.py",))
@@ -196,3 +200,112 @@ def test_a_build_error_is_reported_and_nothing_is_written(monkeypatch, tmp_path:
     assert result.exit_code == 2
     assert "no reviewable source file" in result.output
     assert not (tmp_path / "fixtures" / "sql-bug.json").exists()
+
+
+# --- explanatory comments in the old side -------------------------------------------------
+
+EXPLAINED_FIX = (
+    "def find(user):\n"
+    "    # The query is parameterized: user input must never be concatenated into it, because\n"
+    "    # that is a SQL injection (CWE-89).\n"
+    '    return run("SELECT * FROM users WHERE id = %s", (user,))\n'
+)
+
+
+@pytest.fixture
+def explained_remote(tmp_path: Path) -> SimpleNamespace:
+    """A fix whose code carries a comment that explains the vulnerability."""
+    root = tmp_path / "remote"
+    repo = root / "owner" / "name"
+    (repo / "app").mkdir(parents=True)
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "uploadpack.allowFilter", "true")
+    git(repo, "config", "uploadpack.allowAnySHA1InWant", "true")
+    (repo / "app" / "db.py").write_text(BUGGY, encoding="utf-8")
+    commit_all(repo, "add find")
+    (repo / "app" / "db.py").write_text(EXPLAINED_FIX, encoding="utf-8")
+    fix = commit_all(repo, "fix injection")
+    return SimpleNamespace(template=f"file://{root}/{{repo}}", fix=fix)
+
+
+def hunks_are_consistent(diff: str) -> bool:
+    """Every hunk header's counts match the lines the hunk actually holds."""
+    from pr_inspector.infrastructure.git.diff_extractor import GitCliDiffProvider
+
+    for file_diff in GitCliDiffProvider().parse_unified_diff(diff):
+        for hunk in file_diff.hunks:
+            old = sum(line.line_type in ("context", "del") for line in hunk.lines)
+            new = sum(line.line_type in ("context", "add") for line in hunk.lines)
+            if (old, new) != (hunk.old_lines, hunk.new_lines):
+                return False
+    return True
+
+
+def test_the_fixs_explanation_never_reaches_the_diff_by_default(explained_remote):
+    change = GitChangeSource(explained_remote.template).fetch_reversed_change(
+        "owner/name", explained_remote.fix
+    )
+
+    assert "CWE-89" not in change.diff
+    assert "injection" not in change.diff.lower()
+    assert change.dropped_lines == 2
+    assert "%s" in change.diff  # the safeguard itself is still shown as deleted code
+
+
+def new_side_lines(diff: str) -> list[str]:
+    """The added lines of a diff: the new side, which is the buggy code."""
+    return [line[1:] for line in diff.splitlines() if line.startswith("+") and line[1:2] != "+"]
+
+
+def test_the_rewritten_diff_is_well_formed_and_keeps_the_new_side(explained_remote):
+    source = GitChangeSource(explained_remote.template)
+
+    dropped = source.fetch_reversed_change("owner/name", explained_remote.fix)
+    kept = source.fetch_reversed_change("owner/name", explained_remote.fix, drop_comments=False)
+
+    assert hunks_are_consistent(dropped.diff)
+    assert hunks_are_consistent(kept.diff)
+    # The buggy code, and so every new-side line number, is untouched by the rewrite.
+    assert new_side_lines(dropped.diff) == new_side_lines(kept.diff)
+    assert dropped.files == ("app/db.py",)
+
+
+def test_comments_can_be_kept(explained_remote):
+    change = GitChangeSource(explained_remote.template).fetch_reversed_change(
+        "owner/name", explained_remote.fix, drop_comments=False
+    )
+
+    assert "CWE-89" in change.diff
+    assert change.dropped_lines == 0
+
+
+def test_prose_that_is_not_a_comment_can_be_dropped_with_a_pattern(explained_remote):
+    change = GitChangeSource(explained_remote.template).fetch_reversed_change(
+        "owner/name", explained_remote.fix, drop_comments=False, also_drop=r"parameterized: user"
+    )
+
+    assert "parameterized: user" not in change.diff
+    assert change.dropped_lines == 1
+
+
+def test_an_invalid_pattern_is_a_build_error_before_any_work(explained_remote):
+    with pytest.raises(FixtureBuildError, match="regular expression"):
+        GitChangeSource(explained_remote.template).fetch_reversed_change(
+            "owner/name", explained_remote.fix, also_drop="("
+        )
+
+
+def test_the_command_passes_the_comment_options_through(monkeypatch, tmp_path: Path):
+    source = FakeSource()
+
+    invoke(monkeypatch, tmp_path, source, "--keep-comments", "--also-drop", "prose")
+
+    assert source.options == {"drop_comments": False, "also_drop": "prose"}
+
+
+def test_by_default_the_command_drops_comments(monkeypatch, tmp_path: Path):
+    source = FakeSource()
+
+    invoke(monkeypatch, tmp_path, source)
+
+    assert source.options == {"drop_comments": True, "also_drop": None}

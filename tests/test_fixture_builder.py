@@ -1,6 +1,7 @@
 """Tests for the pure parts of the fixture builder, and its fit with the loader."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,9 @@ from pr_inspector_benchmark.domain.exceptions import FixtureLoadError
 from pr_inspector_benchmark.infrastructure.fixture_builder import (
     FixtureBuildError,
     ReversedChange,
+    explanatory_lines_to_drop,
     guess_language,
+    is_comment_only,
     is_reviewable_source,
     render_skeleton,
     validate_repository,
@@ -180,3 +183,103 @@ def test_a_half_filled_skeleton_is_still_rejected(tmp_path: Path):
 
     with pytest.raises(FixtureLoadError, match="TODO"):
         JsonFixtureLoader(tmp_path).load_all()
+
+
+# --- explanatory comments -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("line", "path"),
+    [
+        ("    # explains the fix", "app/db.py"),
+        ("\t// explains the fix", "cmd/main.go"),
+        ("  // explains the fix", "src/index.ts"),
+        ("/* start of a block", "lib/Foo.java"),
+        ("   * javadoc continuation", "lib/Foo.java"),
+        ("   */", "lib/Foo.java"),
+        ("*", "web/app.js"),
+        ("# also a comment in php", "page.php"),
+    ],
+)
+def test_comment_only_lines_are_recognised_by_language(line: str, path: str):
+    assert is_comment_only(line, path) is True
+
+
+@pytest.mark.parametrize(
+    ("line", "path"),
+    [
+        ("x = 1  # trailing comment", "app/db.py"),  # code with a comment is still code
+        ("    return run(query)", "app/db.py"),
+        ("*ptr = value;", "src/x.c"),  # a pointer dereference, not a comment
+        ("a * b", "lib/Foo.java"),
+        ("#include <stdio.h>", "src/x.c"),  # a preprocessor line is code
+        ("# not a comment in Go", "cmd/main.go"),
+        ("", "app/db.py"),
+        ("   ", "app/db.py"),
+        ("// looks like one", "app/db.py"),  # `//` is floor division territory, not Python
+    ],
+)
+def test_code_and_ambiguous_lines_are_not_treated_as_comments(line: str, path: str):
+    assert is_comment_only(line, path) is False
+
+
+COMMENTED_DIFF = """\
+diff --git a/app/db.py b/app/db.py
+index 1111111..2222222 100644
+--- a/app/db.py
++++ b/app/db.py
+@@ -1,6 +1,4 @@
+ def find(user):
+-    # Parameterized: never concatenate.
+-    # This prevents SQL injection.
+-    return run("SELECT ... %s", (user,))
++    return run("SELECT ..." + user)
+ x = 1
+ y = 2
+@@ -20,3 +18,2 @@ def other():
+     keep = 1
+-    # a later comment
+     return keep
+"""
+
+
+def test_deleted_comment_lines_are_listed_by_their_old_side_line_number():
+    assert explanatory_lines_to_drop(COMMENTED_DIFF) == {"app/db.py": {2, 3, 21}}
+
+
+def test_deleted_code_is_never_listed():
+    drops = explanatory_lines_to_drop(COMMENTED_DIFF)
+
+    assert 4 not in drops["app/db.py"]  # the deleted safeguard is the regression itself
+
+
+def test_comments_can_be_left_out_of_the_listing():
+    assert explanatory_lines_to_drop(COMMENTED_DIFF, comments=False) == {}
+
+
+def test_extra_pattern_lists_matching_deleted_lines_only():
+    drops = explanatory_lines_to_drop(COMMENTED_DIFF, comments=False, extra=re.compile("SELECT"))
+
+    assert drops == {"app/db.py": {4}}  # the added line that also says SELECT is untouched
+
+
+def test_a_deleted_line_that_looks_like_a_file_header_is_still_content():
+    diff = (
+        "diff --git a/app/db.py b/app/db.py\n--- a/app/db.py\n+++ b/app/db.py\n"
+        "@@ -1,3 +1,2 @@\n keep\n--- a deleted line that starts with dashes\n # keep too\n"
+    )
+
+    assert explanatory_lines_to_drop(diff, extra=re.compile("dashes")) == {"app/db.py": {2}}
+
+
+def test_skeleton_says_when_explanatory_lines_were_dropped():
+    change = ReversedChange(diff=DIFF, files=("app/db.py",), dropped_lines=3)
+
+    construction = make_skeleton(change=change)["provenance"]["construction"]
+
+    assert "3 explanatory line(s)" in construction
+    assert "does not explain the fix" in construction
+
+
+def test_skeleton_stays_quiet_when_nothing_was_dropped():
+    assert "explanatory" not in make_skeleton()["provenance"]["construction"]
