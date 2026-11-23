@@ -278,6 +278,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "pr-inspector" },
+    { name = "pydantic" },
     { name = "typer" },
 ]
 
@@ -290,6 +291,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "pr-inspector", git = "https://github.com/Full-Stuck-Engineer/pr-inspector?branch=phase%2F01-diff-cli" },
+    { name = "pydantic", specifier = ">=2.10.0" },
     { name = "typer", specifier = ">=0.15.0" },
 ]
 
