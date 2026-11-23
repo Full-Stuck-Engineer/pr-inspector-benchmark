@@ -4,15 +4,33 @@ This is the only place allowed to know every layer: use cases and adapters are w
 together here as they are added.
 """
 
+import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from pr_inspector_benchmark import __version__
+from pr_inspector_benchmark.application.use_cases.run_benchmark import RunBenchmarkUseCase
 from pr_inspector_benchmark.domain.entities import is_valid_case_id
+from pr_inspector_benchmark.domain.exceptions import FixtureLoadError
+from pr_inspector_benchmark.domain.protocols import ReviewerPort
+from pr_inspector_benchmark.domain.runs import RunInfo
 from pr_inspector_benchmark.infrastructure.fixture_builder import FixtureBuildError, render_skeleton
+from pr_inspector_benchmark.infrastructure.fixture_loader import (
+    JsonFixtureLoader,
+    SubsetFixtureLoader,
+)
 from pr_inspector_benchmark.infrastructure.git_change_source import GitChangeSource
+from pr_inspector_benchmark.infrastructure.pr_inspector_reviewer import (
+    ReviewerSettings,
+    build_reviewer,
+    is_local_endpoint,
+)
+from pr_inspector_benchmark.infrastructure.run_store import write_run
+from pr_inspector_benchmark.infrastructure.token_estimate import estimate_input_tokens
+from pr_inspector_benchmark.interface.formatting import case_line, run_summary
 
 app = typer.Typer(
     name="pr-bench",
@@ -104,3 +122,95 @@ def build_fixture(
     if change.dropped_lines:
         typer.echo(f"dropped {change.dropped_lines} explanatory line(s) from the old side")
     typer.echo("Fill in every TODO field, then check it with the loader.")
+
+
+def create_reviewer(settings: ReviewerSettings) -> ReviewerPort:
+    """Composition root: the reviewer under test."""
+    return build_reviewer(settings)
+
+
+def _read_api_key(variable: str | None, local: bool) -> str | None:
+    """The key comes only from a named environment variable, never from the command line."""
+    if variable is None:
+        if local:
+            return "ollama"  # a local server ignores the key but the client insists on one
+        raise _fail(
+            "a remote endpoint needs --api-key-env <VARIABLE>, the name of the environment "
+            "variable that holds the key"
+        )
+    value = os.environ.get(variable, "")
+    if not value:
+        raise _fail(f"environment variable {variable} is not set or is empty")
+    return value
+
+
+@app.command("run")
+def run(
+    label: Annotated[
+        str, typer.Option("--label", help="Name of this run and of its results file.")
+    ],
+    model: Annotated[str, typer.Option("--model", help="The model to benchmark.")],
+    base_url: Annotated[
+        str, typer.Option("--base-url", help="OpenAI-compatible endpoint. Always explicit.")
+    ],
+    api_key_env: Annotated[
+        str | None,
+        typer.Option("--api-key-env", help="Name of the variable that holds the key, not the key."),
+    ] = None,
+    fixtures: Annotated[Path, typer.Option(help="Directory of fixtures.")] = Path("fixtures"),
+    output_dir: Annotated[Path, typer.Option(help="Where to save the run.")] = Path("results"),
+    only: Annotated[
+        list[str] | None, typer.Option("--only", help="Run only this fixture id. Repeatable.")
+    ] = None,
+    line_tolerance: Annotated[
+        int, typer.Option(min=0, help="Lines of slack around an expected window.")
+    ] = 0,
+    timeout: Annotated[
+        float, typer.Option(min=1, help="Seconds before a request gives up.")
+    ] = 180.0,
+    price_in: Annotated[
+        float | None, typer.Option(min=0, help="USD per million input tokens.")
+    ] = None,
+    price_out: Annotated[
+        float | None, typer.Option(min=0, help="USD per million output tokens.")
+    ] = None,
+    force: Annotated[bool, typer.Option(help="Overwrite an existing results file.")] = False,
+) -> None:
+    """Review every fixture with one model and save the run."""
+    local = is_local_endpoint(base_url)
+    try:
+        info = RunInfo(
+            label=label,
+            model=model,
+            endpoint="local" if local else "remote",
+            started_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            line_tolerance=line_tolerance,
+            # A local model costs nothing. A remote one with no price given has an unknown cost.
+            price_in=0.0 if local and price_in is None else price_in,
+            price_out=0.0 if local and price_out is None else price_out,
+        )
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+
+    target = output_dir / f"{label}.json"
+    if target.exists() and not force:
+        raise _fail(f"{target} already exists; pass --force to overwrite it")
+    api_key = _read_api_key(api_key_env, local)
+
+    loader = JsonFixtureLoader(fixtures)
+    if only:
+        loader = SubsetFixtureLoader(loader, only)
+    reviewer = create_reviewer(
+        ReviewerSettings(model=model, base_url=base_url, api_key=api_key, timeout=timeout)
+    )
+    typer.echo(f"{label}: reviewing with {model} on a {info.endpoint} endpoint")
+    use_case = RunBenchmarkUseCase(loader, reviewer, line_tolerance=line_tolerance)
+    try:
+        cases = loader.load_all()
+        estimates = {case.id: estimate_input_tokens(case.diff) for case in cases}
+        result = use_case.execute(on_case=lambda n, total, r: typer.echo(case_line(n, total, r)))
+    except FixtureLoadError as exc:
+        raise _fail(str(exc)) from exc
+
+    billed = write_run(target, info, result, estimates)
+    typer.echo(run_summary(info, result, str(target), billed))
