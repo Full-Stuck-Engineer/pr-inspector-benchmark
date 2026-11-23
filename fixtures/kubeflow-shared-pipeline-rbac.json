@@ -1,0 +1,27 @@
+{
+  "id": "kubeflow-shared-pipeline-rbac",
+  "description": "Authorization is skipped for every operation on shared, namespace-less pipelines, including writes.",
+  "language": "go",
+  "context": "removed_check",
+  "provenance": {
+    "repository": "kubeflow/pipelines",
+    "license": "Apache-2.0",
+    "reference": "186dd1f3b0403af841c9b4ea7ab94f405339ef6c",
+    "url": "https://github.com/kubeflow/pipelines/commit/186dd1f3b0403af841c9b4ea7ab94f405339ef6c",
+    "construction": "reverse of 186dd1f3b0: the new side of the diff is the code before the change; 3 explanatory line(s) deleted from the old side were dropped so the diff does not explain the fix",
+    "advisory": "GHSA-ghgh-57qv-h687"
+  },
+  "expected": {
+    "risk_level": "HIGH",
+    "rationale": "The check returns success whenever the namespace is empty, so any authenticated user can delete or modify global pipelines. The fix kept the skip for get and list but authorized writes against the system namespace; that authorization is deleted here. GitHub rated the advisory high.",
+    "issues": [
+      {
+        "file_path": "backend/src/apiserver/server/pipeline_server.go",
+        "line_start": 1265,
+        "line_end": 1267,
+        "description": "canAccessPipeline returns nil for all verbs when the namespace is empty, so create, update and delete on shared pipelines are never authorized."
+      }
+    ]
+  },
+  "diff": "diff --git a/backend/src/apiserver/server/pipeline_server.go b/backend/src/apiserver/server/pipeline_server.go\nindex 2f8051b..e41b3ae 100644\n--- a/backend/src/apiserver/server/pipeline_server.go\n+++ b/backend/src/apiserver/server/pipeline_server.go\n@@ -1262,18 +1262,8 @@ func (s *BasePipelineServer) canAccessPipeline(ctx context.Context, pipelineId s\n \t\t\tresourceAttributes.Name = pipeline.Name\n \t\t}\n \t}\n+\t// Skip authentication if the namespace is empty to enable shared pipelines in multi-user mode\n \tif s.resourceManager.IsEmptyNamespace(resourceAttributes.Namespace) {\n-\t\tif resourceAttributes.Verb == common.RbacResourceVerbGet || resourceAttributes.Verb == common.RbacResourceVerbList {\n-\t\t\treturn nil\n-\t\t}\n-\t\tresourceAttributes.Namespace = common.GetPodNamespace()\n-\t\tresourceAttributes.Group = common.RbacPipelinesGroup\n-\t\tresourceAttributes.Version = common.RbacPipelinesVersion\n-\t\tresourceAttributes.Resource = common.RbacResourceTypePipelines\n-\t\terr := s.resourceManager.IsAuthorized(ctx, resourceAttributes)\n-\t\tif err != nil {\n-\t\t\treturn util.Wrapf(err, \"Failed to access shared pipeline %s. Check if you have permission to %s shared pipelines\", pipelineId, resourceAttributes.Verb)\n-\t\t}\n \t\treturn nil\n \t}\n \tresourceAttributes.Group = common.RbacPipelinesGroup\n"
+}

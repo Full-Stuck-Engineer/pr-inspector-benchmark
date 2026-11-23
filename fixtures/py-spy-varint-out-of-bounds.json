@@ -1,0 +1,33 @@
+{
+  "id": "py-spy-varint-out-of-bounds",
+  "description": "read_varint indexes the line table without checking its length.",
+  "language": "rust",
+  "context": "removed_check",
+  "provenance": {
+    "repository": "benfred/py-spy",
+    "license": "MIT",
+    "reference": "PR #736 (merge commit 9ab9703c9b5fffe65d10f25ec5ddb86b0e045095)",
+    "url": "https://github.com/benfred/py-spy/pull/736",
+    "construction": "reverse of 9ab9703c9b: the new side of the diff is the code before the change",
+    "advisory": null
+  },
+  "expected": {
+    "risk_level": "HIGH",
+    "rationale": "The deleted checks returned None once the index ran past the table. Without them, a line table that ends in the middle of a value, as seen with Python 3.12, makes the profiler panic instead of falling back to a default line number. A crash while profiling is HIGH, and the linked issue reports exactly such a panic. This level is a judgement, not an advisory rating.",
+    "issues": [
+      {
+        "file_path": "src/python_interpreters.rs",
+        "line_start": 251,
+        "line_end": 253,
+        "description": "read_varint reads table[*index] with no bounds check, so a truncated line table panics.",
+        "extra_windows": [
+          [
+            258,
+            260
+          ]
+        ]
+      }
+    ]
+  },
+  "diff": "diff --git a/src/python_interpreters.rs b/src/python_interpreters.rs\nindex 84357e8..705fde6 100644\n--- a/src/python_interpreters.rs\n+++ b/src/python_interpreters.rs\n@@ -248,10 +248,7 @@ macro_rules! PythonCodeObjectImpl {\n     };\n }\n \n-fn read_varint(index: &mut usize, table: &[u8]) -> Option<usize> {\n-    if *index >= table.len() {\n-        return None;\n-    }\n+fn read_varint(index: &mut usize, table: &[u8]) -> usize {\n     let mut ret: usize;\n     let mut byte = table[*index];\n     let mut shift = 0;\n@@ -259,23 +256,20 @@ fn read_varint(index: &mut usize, table: &[u8]) -> Option<usize> {\n     ret = (byte & 63) as usize;\n \n     while byte & 64 != 0 {\n-        if *index >= table.len() {\n-            return None;\n-        }\n         byte = table[*index];\n         *index += 1;\n         shift += 6;\n         ret += ((byte & 63) as usize) << shift;\n     }\n-    Some(ret)\n+    ret\n }\n \n-fn read_signed_varint(index: &mut usize, table: &[u8]) -> Option<isize> {\n-    let unsigned_val = read_varint(index, table)?;\n+fn read_signed_varint(index: &mut usize, table: &[u8]) -> isize {\n+    let unsigned_val = read_varint(index, table);\n     if unsigned_val & 1 != 0 {\n-        Some(-((unsigned_val >> 1) as isize))\n+        -((unsigned_val >> 1) as isize)\n     } else {\n-        Some((unsigned_val >> 1) as isize)\n+        (unsigned_val >> 1) as isize\n     }\n }\n \n@@ -330,13 +324,13 @@ macro_rules! CompactCodeObjectImpl {\n                     let line_delta = match code {\n                         15 => 0,\n                         14 => {\n-                            let delta = read_signed_varint(&mut index, table).unwrap_or(0);\n+                            let delta = read_signed_varint(&mut index, table);\n                             read_varint(&mut index, table); // end line\n                             read_varint(&mut index, table); // start column\n                             read_varint(&mut index, table); // end column\n                             delta\n                         }\n-                        13 => read_signed_varint(&mut index, table).unwrap_or(0),\n+                        13 => read_signed_varint(&mut index, table),\n                         10..=12 => {\n                             index += 2; // start column / end column\n                             (code - 10).into()\n"
+}

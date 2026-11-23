@@ -1,0 +1,27 @@
+{
+  "id": "ipython-right-arrow-suggestion",
+  "description": "The key binding that accepts the autosuggestion on right arrow is active anywhere on the line.",
+  "language": "python",
+  "context": "removed_check",
+  "provenance": {
+    "repository": "ipython/ipython",
+    "license": "BSD-3-Clause",
+    "reference": "PR #14052 (merge commit 78fcf82238fb1ca7f84ed25fde0034610e673e91)",
+    "url": "https://github.com/ipython/ipython/pull/14052",
+    "construction": "reverse of 78fcf82238: the new side of the diff is the code before the change",
+    "advisory": null
+  },
+  "expected": {
+    "risk_level": "MEDIUM",
+    "rationale": "The deleted condition limited the binding to a cursor at the end of the line. Without it, pressing right arrow in the middle of a line accepts the suggestion instead of moving the cursor, which breaks basic editing. No data is lost, but a core key misbehaves, so MEDIUM. This level is a judgement, not an advisory rating.",
+    "issues": [
+      {
+        "file_path": "IPython/terminal/shortcuts/__init__.py",
+        "line_start": 278,
+        "line_end": 280,
+        "description": "The right-arrow binding that resumes hinting no longer requires the cursor to be at the end of the line."
+      }
+    ]
+  },
+  "diff": "diff --git a/IPython/terminal/shortcuts/__init__.py b/IPython/terminal/shortcuts/__init__.py\nindex 2f7effb..f8241e0 100644\n--- a/IPython/terminal/shortcuts/__init__.py\n+++ b/IPython/terminal/shortcuts/__init__.py\n@@ -277,9 +277,7 @@ AUTO_SUGGEST_BINDINGS = [\n     Binding(\n         auto_suggest.resume_hinting,\n         [\"right\"],\n-        \"is_cursor_at_the_end_of_line\"\n-        \" & default_buffer_focused\"\n-        \" & emacs_like_insert_mode\",\n+        \"default_buffer_focused & emacs_like_insert_mode\",\n     ),\n ]\n \ndiff --git a/IPython/terminal/shortcuts/filters.py b/IPython/terminal/shortcuts/filters.py\nindex 5a582af..5a28069 100644\n--- a/IPython/terminal/shortcuts/filters.py\n+++ b/IPython/terminal/shortcuts/filters.py\n@@ -52,13 +52,6 @@ def has_line_below() -> bool:\n     return document.cursor_position_row < len(document.lines) - 1\n \n \n-@undoc\n-@Condition\n-def is_cursor_at_the_end_of_line() -> bool:\n-    document = get_app().current_buffer.document\n-    return document.is_cursor_at_the_end_of_line\n-\n-\n @undoc\n @Condition\n def has_line_above() -> bool:\n@@ -186,7 +179,6 @@ KEYBINDING_FILTERS = {\n     \"never\": Never(),\n     \"has_line_below\": has_line_below,\n     \"has_line_above\": has_line_above,\n-    \"is_cursor_at_the_end_of_line\": is_cursor_at_the_end_of_line,\n     \"has_selection\": has_selection,\n     \"has_suggestion\": has_suggestion,\n     \"vi_mode\": vi_mode,\n"
+}

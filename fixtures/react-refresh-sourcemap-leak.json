@@ -1,0 +1,27 @@
+{
+  "id": "react-refresh-sourcemap-leak",
+  "description": "A SourceMapConsumer is created for every loaded file and never destroyed.",
+  "language": "javascript",
+  "context": "removed_check",
+  "provenance": {
+    "repository": "pmmmwh/react-refresh-webpack-plugin",
+    "license": "MIT",
+    "reference": "PR #537 (merge commit 77be80c859d44ff4528478e754aedf5f6df48965)",
+    "url": "https://github.com/pmmmwh/react-refresh-webpack-plugin/pull/537",
+    "construction": "reverse of 77be80c859: the new side of the diff is the code before the change",
+    "advisory": null
+  },
+  "expected": {
+    "risk_level": "MEDIUM",
+    "rationale": "The consumer holds WebAssembly memory that has to be released with destroy(). The deleted SourceMapConsumer.with call released it automatically. Without it, every processed file leaks memory, which slows large builds, as the linked issue reports. MEDIUM is a judgement, not an advisory rating.",
+    "issues": [
+      {
+        "file_path": "loader/index.js",
+        "line_start": 78,
+        "line_end": 81,
+        "description": "new SourceMapConsumer(...) is created and awaited but never destroyed, so each file leaks the memory the consumer holds."
+      }
+    ]
+  },
+  "diff": "diff --git a/loader/index.js b/loader/index.js\nindex 282f11b..e81e873 100644\n--- a/loader/index.js\n+++ b/loader/index.js\n@@ -75,15 +75,16 @@ function ReactRefreshLoader(source, inputSourceMap, meta) {\n         originalSourceMap = getIdentitySourceMap(source, this.resourcePath);\n       }\n \n-      return SourceMapConsumer.with(originalSourceMap, undefined, (consumer) => {\n-        const node = SourceNode.fromStringWithSourceMap(source, consumer);\n+      const node = SourceNode.fromStringWithSourceMap(\n+        source,\n+        await new SourceMapConsumer(originalSourceMap)\n+      );\n \n-        node.prepend([RefreshSetupRuntime, '\\n\\n']);\n-        node.add(['\\n\\n', RefreshModuleRuntime]);\n+      node.prepend([RefreshSetupRuntime, '\\n\\n']);\n+      node.add(['\\n\\n', RefreshModuleRuntime]);\n \n-        const { code, map } = node.toStringWithSourceMap();\n-        return [code, map.toJSON()];\n-      });\n+      const { code, map } = node.toStringWithSourceMap();\n+      return [code, map.toJSON()];\n     } else {\n       return [[RefreshSetupRuntime, source, RefreshModuleRuntime].join('\\n\\n'), inputSourceMap];\n     }\n"
+}

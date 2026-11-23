@@ -1,0 +1,33 @@
+{
+  "id": "vault-webhook-addr-ssrf",
+  "description": "The Vault webhook connects to an address taken from a pod annotation without validating it, and an annotation can also switch TLS verification off.",
+  "language": "go",
+  "context": "removed_check",
+  "provenance": {
+    "repository": "bank-vaults/vault-secrets-webhook",
+    "license": "Apache-2.0",
+    "reference": "76db45976fee0f54cafd94dffa425e6b542f65a0",
+    "url": "https://github.com/bank-vaults/vault-secrets-webhook/commit/76db45976fee0f54cafd94dffa425e6b542f65a0",
+    "construction": "reverse of 76db45976f: the new side of the diff is the code before the change; 1 explanatory line(s) deleted from the old side were dropped so the diff does not explain the fix",
+    "advisory": "GHSA-r2v3-8gwf-7ghm"
+  },
+  "expected": {
+    "risk_level": "CRITICAL",
+    "rationale": "Annotations are controlled by whoever can create a workload. The webhook uses the annotated address for an outbound call made with its own credentials (SSRF), and a second annotation turns certificate verification off. The fix added address validation and an operator opt-in for skipping verification; both are deleted here. GitHub rated the advisory critical.",
+    "issues": [
+      {
+        "file_path": "pkg/webhook/webhook.go",
+        "line_start": 202,
+        "line_end": 204,
+        "description": "The Vault address from the object annotation is used to build the client with no validation of where it points."
+      },
+      {
+        "file_path": "pkg/webhook/config.go",
+        "line_start": 147,
+        "line_end": 148,
+        "description": "An annotation on the object can disable TLS certificate verification for the Vault connection."
+      }
+    ]
+  },
+  "diff": "diff --git a/pkg/webhook/config.go b/pkg/webhook/config.go\nindex 304f7e6..d1e621b 100644\n--- a/pkg/webhook/config.go\n+++ b/pkg/webhook/config.go\n@@ -30,7 +30,6 @@ import (\n // VaultConfig represents vault options\n type VaultConfig struct {\n \tAddr                          string\n-\tAddrFromObject                bool\n \tAuthMethod                    string\n \tRole                          string\n \tPath                          string\n@@ -107,7 +106,6 @@ func parseVaultConfig(obj metav1.Object, ar *model.AdmissionReview) VaultConfig\n \n \tif val, ok := annotations[common.VaultAddrAnnotation]; ok {\n \t\tvaultConfig.Addr = val\n-\t\tvaultConfig.AddrFromObject = true\n \t} else {\n \t\tvaultConfig.Addr = viper.GetString(\"vault_addr\")\n \t}\n@@ -147,7 +145,7 @@ func parseVaultConfig(obj metav1.Object, ar *model.AdmissionReview) VaultConfig\n \t}\n \n \tif val, ok := annotations[common.VaultSkipVerifyAnnotation]; ok {\n-\t\tvaultConfig.SkipVerify = common.ResolveObjectSkipVerify(val, \"vault_allow_object_skip_verify\", \"vault_skip_verify\")\n+\t\tvaultConfig.SkipVerify, _ = strconv.ParseBool(val)\n \t} else {\n \t\tvaultConfig.SkipVerify = viper.GetBool(\"vault_skip_verify\")\n \t}\n@@ -475,9 +473,6 @@ func SetConfigDefaults() {\n \tviper.SetDefault(\"vault_ct_pull_policy\", string(corev1.PullIfNotPresent))\n \tviper.SetDefault(\"vault_addr\", \"https://vault:8200\")\n \tviper.SetDefault(\"vault_skip_verify\", \"false\")\n-\tviper.SetDefault(\"vault_addr_allowlist\", \"\")\n-\tviper.SetDefault(\"vault_allow_object_skip_verify\", \"false\")\n-\tviper.SetDefault(\"vault_allow_private_addr\", \"false\")\n \tviper.SetDefault(\"vault_path\", \"kubernetes\")\n \tviper.SetDefault(\"vault_auth_method\", \"jwt\")\n \tviper.SetDefault(\"vault_role\", \"\")\ndiff --git a/pkg/webhook/webhook.go b/pkg/webhook/webhook.go\nindex 640a672..78cf849 100644\n--- a/pkg/webhook/webhook.go\n+++ b/pkg/webhook/webhook.go\n@@ -32,7 +32,6 @@ import (\n \t\"github.com/slok/kubewebhook/v2/pkg/log\"\n \t\"github.com/slok/kubewebhook/v2/pkg/model\"\n \t\"github.com/slok/kubewebhook/v2/pkg/webhook/mutating\"\n-\t\"github.com/spf13/viper\"\n \tauthenticationv1 \"k8s.io/api/authentication/v1\"\n \tcorev1 \"k8s.io/api/core/v1\"\n \tapierrors \"k8s.io/apimachinery/pkg/api/errors\"\n@@ -194,18 +193,6 @@ func (mw *MutatingWebhook) lookForValueFrom(ctx context.Context, env corev1.EnvV\n \treturn nil, nil\n }\n \n-func vaultAddrPolicy() common.AddrPolicy {\n-\tallowlist := common.SplitAndTrim(viper.GetString(\"vault_addr_allowlist\"))\n-\tif addr := viper.GetString(\"vault_addr\"); addr != \"\" {\n-\t\tallowlist = append(allowlist, addr) // trusted operator default is implicitly allowed\n-\t}\n-\n-\treturn common.AddrPolicy{\n-\t\tAllowlist:    allowlist,\n-\t\tAllowPrivate: viper.GetBool(\"vault_allow_private_addr\"),\n-\t}\n-}\n-\n func (mw *MutatingWebhook) newVaultClient(ctx context.Context, vaultConfig VaultConfig) (*vault.Client, error) {\n \tvaultAuthAttemptsCount.WithLabelValues().Inc()\n \tclientConfig := vaultapi.DefaultConfig()\n@@ -214,13 +201,6 @@ func (mw *MutatingWebhook) newVaultClient(ctx context.Context, vaultConfig Vault\n \t\treturn nil, clientConfig.Error\n \t}\n \n-\tif vaultConfig.AddrFromObject {\n-\t\tif err := common.ValidateObjectAddr(vaultConfig.Addr, vaultAddrPolicy()); err != nil {\n-\t\t\tvaultAuthAttemptsErrorsCount.WithLabelValues(\"config_error\").Inc()\n-\t\t\treturn nil, errors.Wrap(err, \"rejected Vault address from object annotation\")\n-\t\t}\n-\t}\n-\n \tclientConfig.Address = vaultConfig.Addr\n \n \ttlsConfig := vaultapi.TLSConfig{Insecure: vaultConfig.SkipVerify}\n"
+}

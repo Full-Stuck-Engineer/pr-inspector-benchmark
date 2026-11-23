@@ -1,0 +1,39 @@
+{
+  "id": "qbee-agent-symlink-write",
+  "description": "The agent, which runs as root, follows symlinks when it creates files and directories at configured paths.",
+  "language": "go",
+  "context": "removed_check",
+  "provenance": {
+    "repository": "qbee-io/qbee-agent",
+    "license": "Apache-2.0",
+    "reference": "0fdf8e411de5d0c142ae2590cf1c54bdfc2e529a",
+    "url": "https://github.com/qbee-io/qbee-agent/commit/0fdf8e411de5d0c142ae2590cf1c54bdfc2e529a",
+    "construction": "reverse of 0fdf8e411d: the new side of the diff is the code before the change; 11 explanatory line(s) deleted from the old side were dropped so the diff does not explain the fix",
+    "advisory": "GHSA-xhv5-8fpq-g7hf"
+  },
+  "expected": {
+    "risk_level": "HIGH",
+    "rationale": "With no O_NOFOLLOW on the final path component and no refusal of symlinked directory components, a local user can plant a symlink and make the agent create, truncate or chown files elsewhere. The fix added all three protections; they are removed here. GitHub rated the advisory high.",
+    "issues": [
+      {
+        "file_path": "app/configuration/file_manager.go",
+        "line_start": 499,
+        "line_end": 503,
+        "description": "The file is opened without O_NOFOLLOW, so a symlink at the final path component is followed by a process running as root."
+      },
+      {
+        "file_path": "app/configuration/file_manager.go",
+        "line_start": 618,
+        "line_end": 619,
+        "description": "Ancestor directories are examined with os.Stat, which follows symlinks, instead of os.Lstat."
+      },
+      {
+        "file_path": "app/configuration/file_manager.go",
+        "line_start": 638,
+        "line_end": 640,
+        "description": "A symlinked path component is no longer rejected before the code treats it as a directory."
+      }
+    ]
+  },
+  "diff": "diff --git a/app/configuration/file_manager.go b/app/configuration/file_manager.go\nindex fac49c5..acf2b21 100644\n--- a/app/configuration/file_manager.go\n+++ b/app/configuration/file_manager.go\n@@ -497,7 +497,7 @@ func createFile(path string, fileCreateData *fileCreateData, permission os.FileM\n \t\treturn nil, err\n \t}\n \n-\topenFlags := os.O_RDWR | os.O_CREATE | syscall.O_NOFOLLOW\n+\topenFlags := os.O_RDWR | os.O_CREATE\n \n \tif truncate {\n \t\topenFlags = openFlags | os.O_TRUNC\n@@ -615,12 +615,13 @@ func makeDirectories(dst string, permissions os.FileMode, uid, gid int) error {\n \n \tdirPath := filepath.Dir(dst)\n \n-\tif err := makeDirectories(dirPath, permissions, uid, gid); err != nil {\n-\t\treturn err\n-\t}\n-\n-\tdirInfo, err := os.Lstat(dirPath)\n+\tdirInfo, err := os.Stat(dirPath)\n \tif errors.Is(err, os.ErrNotExist) {\n+\t\t// ensure parent exists\n+\t\tif err = makeDirectories(dirPath, permissions, uid, gid); err != nil {\n+\t\t\treturn err\n+\t\t}\n+\n \t\tif err = os.Mkdir(dirPath, permissions); err != nil {\n \t\t\treturn fmt.Errorf(\"cannot create directorty %s: %w\", dirPath, err)\n \t\t}\n@@ -636,10 +637,6 @@ func makeDirectories(dst string, permissions os.FileMode, uid, gid int) error {\n \t\treturn fmt.Errorf(\"cannot create directory %s: %w\", dirPath, err)\n \t}\n \n-\tif dirInfo.Mode()&os.ModeSymlink != 0 {\n-\t\treturn fmt.Errorf(\"refusing to traverse symlinked path component %s\", dirPath)\n-\t}\n-\n \tif !dirInfo.IsDir() {\n \t\treturn fmt.Errorf(\"cannot create directory, %s is a file\", dirPath)\n \t}\n"
+}

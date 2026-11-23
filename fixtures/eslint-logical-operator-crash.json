@@ -1,0 +1,37 @@
+{
+  "id": "eslint-logical-operator-crash",
+  "description": "The code-path analyzer treats every logical expression as && or ||.",
+  "language": "javascript",
+  "context": "removed_check",
+  "provenance": {
+    "repository": "eslint/eslint",
+    "license": "MIT",
+    "reference": "PR #10476 (merge commit f93d6ff53acd19b39dbc1c7d0e5ffa7d71c826db)",
+    "url": "https://github.com/eslint/eslint/pull/10476",
+    "construction": "reverse of f93d6ff53a: the new side of the diff is the code before the change; 7 explanatory line(s) deleted from the old side were dropped so the diff does not explain the fix",
+    "advisory": null
+  },
+  "expected": {
+    "risk_level": "HIGH",
+    "rationale": "The deleted filter limited choice-context handling to && and ||. Any other logical operator, such as the nullish coalescing operator ??, now pushes and pops a context as if it were one of them, which ends in an 'unreachable' error and makes the linter fail on valid modern code, as the linked issue reports. A crash on valid input is HIGH. This level is a judgement, not an advisory rating.",
+    "issues": [
+      {
+        "file_path": "lib/code-path-analysis/code-path-analyzer.js",
+        "line_start": 364,
+        "line_end": 364,
+        "description": "pushChoiceContext runs for every LogicalExpression, whatever its operator, and the matching right-operand and pop handling no longer check the operator either.",
+        "extra_windows": [
+          [
+            232,
+            233
+          ],
+          [
+            433,
+            434
+          ]
+        ]
+      }
+    ]
+  },
+  "diff": "diff --git a/lib/code-path-analysis/code-path-analyzer.js b/lib/code-path-analysis/code-path-analyzer.js\nindex 05c6bb7..1a4f787 100644\n--- a/lib/code-path-analysis/code-path-analyzer.js\n+++ b/lib/code-path-analysis/code-path-analyzer.js\n@@ -30,10 +30,6 @@ function isCaseNode(node) {\n     return Boolean(node.test);\n }\n \n-function isHandledLogicalOperator(operator) {\n-    return operator === \"&&\" || operator === \"||\";\n-}\n-\n /**\n  * Checks whether or not a given logical expression node goes different path\n  * between the `true` case and the `false` case.\n@@ -234,10 +230,7 @@ function preprocess(analyzer, node) {\n \n     switch (parent.type) {\n         case \"LogicalExpression\":\n-            if (\n-                parent.right === node &&\n-                isHandledLogicalOperator(parent.operator)\n-            ) {\n+            if (parent.right === node) {\n                 state.makeLogicalRight();\n             }\n             break;\n@@ -368,12 +361,7 @@ function processCodePathToEnter(analyzer, node) {\n             break;\n \n         case \"LogicalExpression\":\n-            if (isHandledLogicalOperator(node.operator)) {\n-                state.pushChoiceContext(\n-                    node.operator,\n-                    isForkingByTrueOrFalse(node)\n-                );\n-            }\n+            state.pushChoiceContext(node.operator, isForkingByTrueOrFalse(node));\n             break;\n \n         case \"ConditionalExpression\":\n@@ -442,13 +430,8 @@ function processCodePathToExit(analyzer, node) {\n     switch (node.type) {\n         case \"IfStatement\":\n         case \"ConditionalExpression\":\n-            state.popChoiceContext();\n-            break;\n-\n         case \"LogicalExpression\":\n-            if (isHandledLogicalOperator(node.operator)) {\n-                state.popChoiceContext();\n-            }\n+            state.popChoiceContext();\n             break;\n \n         case \"SwitchStatement\":\n"
+}

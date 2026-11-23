@@ -1,0 +1,93 @@
+{
+  "id": "safari-mcp-js-escape-injection",
+  "description": "Values are escaped for single-quoted JavaScript strings by escaping the quote but not the backslash, at every place that builds a script from tool arguments.",
+  "language": "javascript",
+  "context": "in_diff",
+  "provenance": {
+    "repository": "achiya-automation/safari-mcp",
+    "license": "MIT",
+    "reference": "23f1319defefd2c5cbd06b23189ab01876a8c5d3",
+    "url": "https://github.com/achiya-automation/safari-mcp/commit/23f1319defefd2c5cbd06b23189ab01876a8c5d3",
+    "construction": "reverse of 23f1319def: the new side of the diff is the code before the change",
+    "advisory": "GHSA-4rj4-rcrq-gr92"
+  },
+  "expected": {
+    "risk_level": "MEDIUM",
+    "rationale": "A value ending in a backslash neutralizes the escaping quote and lets the rest of the argument run as code in the browser page. The same incomplete rule is repeated at many call sites, while other code in the file still escapes backslashes first (the `val` line in selectOption), which shows the intended rule. GitHub rated the advisory medium.",
+    "issues": [
+      {
+        "file_path": "safari.js",
+        "line_start": 1001,
+        "line_end": 1001,
+        "description": "The value is escaped with replace(/'/g, \"\\\\'\") only; a backslash in the input is not escaped, so it can break out of the single-quoted JavaScript string. The same incomplete escape appears at the other call sites.",
+        "extra_windows": [
+          [
+            3245,
+            3245
+          ],
+          [
+            3267,
+            3267
+          ],
+          [
+            3284,
+            3284
+          ],
+          [
+            3521,
+            3521
+          ],
+          [
+            3536,
+            3536
+          ],
+          [
+            3697,
+            3697
+          ],
+          [
+            5184,
+            5184
+          ],
+          [
+            5416,
+            5416
+          ],
+          [
+            5668,
+            5668
+          ],
+          [
+            5900,
+            5900
+          ],
+          [
+            6245,
+            6245
+          ],
+          [
+            6353,
+            6353
+          ],
+          [
+            6362,
+            6362
+          ],
+          [
+            6427,
+            6427
+          ],
+          [
+            6479,
+            6479
+          ],
+          [
+            6480,
+            6480
+          ]
+        ]
+      }
+    ]
+  },
+  "diff": "diff --git a/safari.js b/safari.js\nindex 0d84695..6c7ed17 100644\n--- a/safari.js\n+++ b/safari.js\n@@ -998,7 +998,7 @@ function _windowById(id) {\n // Page JavaScript that answers \"1\" when the page carries exactly `marker`: in window.name, or in\n // window.__mcpTabMarker once a page has taken window.name over.\n function _markerCheckJS(marker) {\n-  const safeMarker = String(marker).replace(/\\\\/g, \"\\\\\\\\\").replace(/'/g, \"\\\\'\");\n+  const safeMarker = String(marker).replace(/'/g, \"\\\\'\");\n   return `(function(){try{return (window.name==='${safeMarker}'||window.__mcpTabMarker==='${safeMarker}')?'1':'0'}catch(e){return '0'}})()`;\n }\n \n@@ -3242,7 +3242,7 @@ export async function selectOption({ selector, value, ref }) {\n   const val = String(value).replace(/\\\\/g, \"\\\\\\\\\").replace(/'/g, \"\\\\'\");\n   let finder;\n   if (ref) {\n-    finder = `mcpFindRef('${escJsSingleQuote(ref)}')`;\n+    finder = `mcpFindRef('${String(ref).replace(/'/g, \"\\\\'\")}')`;\n   } else if (selector) {\n     const sel = escJsSingleQuote(selector);\n     finder = `(document.querySelector('${sel}')||mcpQuerySelectorDeep('${sel}'))`;\n@@ -3264,7 +3264,7 @@ export async function reactSelectSet({ selector, ref, value }) {\n   if (value === undefined || value === null) throw new Error(\"reactSelectSet requires 'value' (option label)\");\n   let finder;\n   if (ref) {\n-    const safeRef = escJsSingleQuote(ref);\n+    const safeRef = String(ref).replace(/'/g, \"\\\\'\");\n     finder = `mcpFindRef('${safeRef}')`;\n   } else if (selector) {\n     const sel = escJsSingleQuote(selector);\n@@ -3281,7 +3281,7 @@ export async function reactSelectListOptions({ selector, ref }) {\n   await ensureHelpers();\n   let finder;\n   if (ref) {\n-    const safeRef = escJsSingleQuote(ref);\n+    const safeRef = String(ref).replace(/'/g, \"\\\\'\");\n     finder = `mcpFindRef('${safeRef}')`;\n   } else if (selector) {\n     const sel = escJsSingleQuote(selector);\n@@ -3518,7 +3518,7 @@ export async function pressKey({ key, modifiers = [] }) {\n \n   // Non-modifier keys: pure JavaScript (no System Events)\n   const jsKey = jsKeyMap[k] || key;\n-  const safeKey = escJsSingleQuote(jsKey);\n+  const safeKey = jsKey.replace(/'/g, \"\\\\'\");\n   // W3C `code` values: special keys are NOT \"Key\"-prefixed (\"Enter\", \"ArrowUp\", ...);\n   // only letters are (\"KeyA\"), digits are \"Digit1\". Apps that route on event.code\n   // (Notion, Monaco, Google Docs) ignore a bogus \"KeyEnter\".\n@@ -3533,7 +3533,7 @@ export async function pressKey({ key, modifiers = [] }) {\n     || (/^[a-z]$/i.test(jsKey) ? \"Key\" + jsKey.toUpperCase()\n       : /^[0-9]$/.test(jsKey) ? \"Digit\" + jsKey\n         : jsKey);\n-  const safeCode = escJsSingleQuote(jsCode);\n+  const safeCode = jsCode.replace(/'/g, \"\\\\'\");\n   const shiftKey = hasShift;\n   const altKey = modifiers.some((m) => m.toLowerCase() === \"alt\");\n \n@@ -3694,7 +3694,7 @@ export async function replaceEditorContent({ text }) {\n   // then call onChange(text) to sync React. Works for Airtable-style embeds\n   // and is a no-op on plain Monaco (VS Code web, GitHub) where setValue\n   // already covers the state.\n-  const preflightFirstLine = escJsSingleQuote(text.split('\\n')[0].slice(0, 20));\n+  const preflightFirstLine = text.split('\\n')[0].slice(0, 20).replace(/'/g, \"\\\\'\");\n   const monacoPreflight = await runJS(\n     `(function(){\n       var m = (typeof monaco !== 'undefined') ? monaco : window.monaco;\n@@ -5181,7 +5181,7 @@ export async function uploadFile({ selector, filePath, forceNative = false, veri\n     xlsx: \"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\",\n   };\n   const mime = mimeMap[ext] || \"application/octet-stream\";\n-  const safeName = escJsSingleQuote(fileName);\n+  const safeName = fileName.replace(/'/g, \"\\\\'\");\n \n   // forceNative: skip synthetic injection entirely. Attempting it first would leave a stray\n   // media item behind on sites that register the pickup in their UI without ingesting it\n@@ -5413,7 +5413,7 @@ export async function pasteImageFromFile({ filePath, locate = null }) {\n   // Read image as base64\n   const fileData = await readFile(filePath);\n   const base64 = fileData.toString(\"base64\");\n-  const fileName = escJsSingleQuote(filePath.split(\"/\").pop());\n+  const fileName = filePath.split(\"/\").pop().replace(/'/g, \"\\\\'\");\n \n   // Use runJSLarge — images are often >260KB as base64\n   const result = await runJSLarge(\n@@ -5665,7 +5665,7 @@ export function getNextSnapshotGen() { return _snapshotGen++; }\n export async function takeSnapshot({ selector, _gen } = {}) {\n   // Use provided gen (from tool path) or allocate a new one (direct call)\n   const gen = _gen != null ? _gen : _snapshotGen++;\n-  const root = selector ? `document.querySelector('${escJsSingleQuote(selector)}')` : \"document.body\";\n+  const root = selector ? `document.querySelector('${selector.replace(/'/g, \"\\\\'\")}')` : \"document.body\";\n \n   const result = await runJS(\n     `(function(){\n@@ -5897,7 +5897,7 @@ export async function runScript({ steps, onStep, actions: overrides = {} }) {\n // ========== ACCESSIBILITY SNAPSHOT ==========\n \n export async function getAccessibilityTree({ selector, maxDepth = 5 }) {\n-  const sel = selector ? `'${escJsSingleQuote(selector)}'` : \"null\";\n+  const sel = selector ? `'${selector.replace(/'/g, \"\\\\'\")}'` : \"null\";\n   return runJS(\n     `(function(){\n       function buildTree(el, depth) {\n@@ -6242,7 +6242,7 @@ export async function clearNetworkCapture() {\n }\n \n export async function getNetworkDetails({ limit = 50, filter } = {}) {\n-  const filterStr = filter ? `.filter(function(r){return r.url.includes('${escJsSingleQuote(filter)}')})` : \"\";\n+  const filterStr = filter ? `.filter(function(r){return r.url.includes('${filter.replace(/'/g, \"\\\\'\")}')})` : \"\";\n   return runJS(\n     `JSON.stringify((window.__mcp_network||[])${filterStr}.slice(-${Number(limit)}))`\n   );\n@@ -6350,7 +6350,7 @@ export async function throttleNetwork({ profile, latency, downloadKbps, uploadKb\n // ========== CONSOLE FILTER ==========\n \n export async function getConsoleByLevel({ level }) {\n-  const safeLevel = escJsSingleQuote(level);\n+  const safeLevel = level.replace(/'/g, \"\\\\'\");\n   return runJS(\n     `JSON.stringify((window.__mcp_console||[]).filter(function(m){return m.level==='${safeLevel}'}))`\n   );\n@@ -6359,7 +6359,7 @@ export async function getConsoleByLevel({ level }) {\n // ========== DATA EXTRACTION ==========\n \n export async function extractTables({ selector, limit = 10 }) {\n-  const sel = selector ? `'${escJsSingleQuote(selector)}'` : \"'table'\";\n+  const sel = selector ? `'${selector.replace(/'/g, \"\\\\'\")}'` : \"'table'\";\n   return runJS(\n     `(function(){\n       var tables = [...document.querySelectorAll(${sel})].slice(0, ${Number(limit)});\n@@ -6424,7 +6424,7 @@ export async function extractImages({ limit = 50 }) {\n \n export async function extractLinks({ limit = 100, filter }) {\n   const filterStr = filter\n-    ? `.filter(function(a){return a.href.includes('${escJsSingleQuote(filter)}')||a.textContent.includes('${escJsSingleQuote(filter)}')})`\n+    ? `.filter(function(a){return a.href.includes('${filter.replace(/'/g, \"\\\\'\")}')||a.textContent.includes('${filter.replace(/'/g, \"\\\\'\")}')})`\n     : \"\";\n   return runJS(\n     `JSON.stringify([...document.querySelectorAll('a[href]')]${filterStr}.slice(0,${Number(limit)}).map(function(a){\n@@ -6476,8 +6476,8 @@ export async function getComputedStyles({ selector, properties }) {\n // ========== INDEXEDDB ==========\n \n export async function getIndexedDB({ dbName, storeName, limit = 20 }) {\n-  const safeDb = escJsSingleQuote(dbName);\n-  const safeStore = escJsSingleQuote(storeName);\n+  const safeDb = dbName.replace(/'/g, \"\\\\'\");\n+  const safeStore = storeName.replace(/'/g, \"\\\\'\");\n   // `do JavaScript` can't await a Promise — route async work through the Node-side poller.\n   return _evaluateAsync(\n     `(async function(){\n"
+}

@@ -1,0 +1,27 @@
+{
+  "id": "jackson-typeid-cache-unbounded",
+  "description": "Every resolved polymorphic type id is cached with no limit on the number of entries or on the length of an id.",
+  "language": "java",
+  "context": "removed_check",
+  "provenance": {
+    "repository": "FasterXML/jackson-databind",
+    "license": "Apache-2.0",
+    "reference": "2870d1d6dc1b7e1c07ee11dd5b04ab71cddbb577",
+    "url": "https://github.com/FasterXML/jackson-databind/commit/2870d1d6dc1b7e1c07ee11dd5b04ab71cddbb577",
+    "construction": "reverse of 2870d1d6dc: the new side of the diff is the code before the change; 29 explanatory line(s) deleted from the old side were dropped so the diff does not explain the fix",
+    "advisory": "GHSA-wv8q-qhhj-9h54"
+  },
+  "expected": {
+    "risk_level": "HIGH",
+    "rationale": "Type ids come from untrusted JSON. With the entry cap and the id-length cap deleted, an attacker can send many distinct or very long ids and grow the cache without bound until memory is exhausted. GitHub rated the advisory high.",
+    "issues": [
+      {
+        "file_path": "src/main/java/com/fasterxml/jackson/databind/jsontype/impl/TypeDeserializerBase.java",
+        "line_start": 203,
+        "line_end": 205,
+        "description": "_deserializers.put(typeId, deser) caches every attacker-supplied type id with no cap on entries or on id length."
+      }
+    ]
+  },
+  "diff": "diff --git a/src/main/java/com/fasterxml/jackson/databind/jsontype/impl/TypeDeserializerBase.java b/src/main/java/com/fasterxml/jackson/databind/jsontype/impl/TypeDeserializerBase.java\nindex 00e0631..8dad89b 100644\n--- a/src/main/java/com/fasterxml/jackson/databind/jsontype/impl/TypeDeserializerBase.java\n+++ b/src/main/java/com/fasterxml/jackson/databind/jsontype/impl/TypeDeserializerBase.java\n@@ -23,10 +23,6 @@ public abstract class TypeDeserializerBase\n {\n     private static final long serialVersionUID = 1;\n \n-    final static int MAX_CACHED_TYPE_IDS = 1000;\n-\n-    final static int MAX_CACHED_TYPE_ID_LENGTH = 256;\n-\n     protected final TypeIdResolver _idResolver;\n \n     protected final JavaType _baseType;\n@@ -172,10 +168,7 @@ public abstract class TypeDeserializerBase\n                         return NullifyingDeserializer.instance;\n                     }\n                     // ... would this actually work?\n-                    return ctxt.findContextualValueDeserializer(actual, _property);\n-                }\n-                if (deser == NullifyingDeserializer.instance) {\n-                    return deser;\n+                    deser = ctxt.findContextualValueDeserializer(actual, _property);\n                 }\n             } else {\n                 /* 16-Dec-2010, tatu: Since nominal type we get here has no (generic) type parameters,\n@@ -209,12 +202,6 @@ public abstract class TypeDeserializerBase\n                 }\n                 deser = ctxt.findContextualValueDeserializer(type, _property);\n             }\n-            if (typeId.length() > MAX_CACHED_TYPE_ID_LENGTH) {\n-                return deser;\n-            }\n-            if (_deserializers.size() >= MAX_CACHED_TYPE_IDS) {\n-                _deserializers.clear();\n-            }\n             _deserializers.put(typeId, deser);\n         }\n         return deser;\n"
+}

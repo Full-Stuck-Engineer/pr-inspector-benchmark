@@ -1,0 +1,27 @@
+{
+  "id": "helm-alias-shared-dependencies",
+  "description": "An aliased subchart is a shallow copy that shares its dependency list and metadata entries with the original chart.",
+  "language": "go",
+  "context": "removed_check",
+  "provenance": {
+    "repository": "helm/helm",
+    "license": "Apache-2.0",
+    "reference": "PR #9175 (merge commit a911aa211248899a8722159f8422a96a8222a4f8)",
+    "url": "https://github.com/helm/helm/pull/9175",
+    "construction": "reverse of a911aa2112: the new side of the diff is the code before the change; 5 explanatory line(s) deleted from the old side were dropped so the diff does not explain the fix",
+    "advisory": null
+  },
+  "expected": {
+    "risk_level": "MEDIUM",
+    "rationale": "`out := *c` copies the struct but not the slices and pointers inside it. When a subchart is referenced under several aliases, changes made while processing one alias show up in the others and in the parent. The deleted code made fresh copies, and the linked issue reports sub-subcharts of aliased subcharts being evaluated wrongly. MEDIUM is a judgement, not an advisory rating.",
+    "issues": [
+      {
+        "file_path": "pkg/chart/v2/util/dependencies.go",
+        "line_start": 106,
+        "line_end": 108,
+        "description": "The aliased chart is a shallow copy, so its dependencies and the Metadata.Dependencies entries are shared with the original instead of being copied."
+      }
+    ]
+  },
+  "diff": "diff --git a/pkg/chart/v2/util/dependencies.go b/pkg/chart/v2/util/dependencies.go\nindex 39fa472..b7f7801 100644\n--- a/pkg/chart/v2/util/dependencies.go\n+++ b/pkg/chart/v2/util/dependencies.go\n@@ -104,36 +104,17 @@ func getAliasDependency(charts []*chart.Chart, dep *chart.Dependency) *chart.Cha\n \t\t}\n \n \t\tout := *c\n-\t\tout.Metadata = copyMetadata(c.Metadata)\n-\n-\t\tout.SetDependencies()\n-\t\tfor _, dependency := range c.Dependencies() {\n-\t\t\tcpy := *dependency\n-\t\t\tout.AddDependency(&cpy)\n-\t\t}\n+\t\tmd := *c.Metadata\n+\t\tout.Metadata = &md\n \n \t\tif dep.Alias != \"\" {\n-\t\t\tout.Metadata.Name = dep.Alias\n+\t\t\tmd.Name = dep.Alias\n \t\t}\n \t\treturn &out\n \t}\n \treturn nil\n }\n \n-func copyMetadata(metadata *chart.Metadata) *chart.Metadata {\n-\tmd := *metadata\n-\n-\tif md.Dependencies != nil {\n-\t\tdependencies := make([]*chart.Dependency, len(md.Dependencies))\n-\t\tfor i := range md.Dependencies {\n-\t\t\tdependency := *md.Dependencies[i]\n-\t\t\tdependencies[i] = &dependency\n-\t\t}\n-\t\tmd.Dependencies = dependencies\n-\t}\n-\treturn &md\n-}\n-\n // processDependencyEnabled removes disabled charts from dependencies\n func processDependencyEnabled(c *chart.Chart, v map[string]interface{}, path string) error {\n \tif c.Metadata.Dependencies == nil {\n"
+}

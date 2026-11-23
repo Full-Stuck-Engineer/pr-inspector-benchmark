@@ -1,0 +1,33 @@
+{
+  "id": "netfoil-ttl-not-decremented",
+  "description": "DNS answer TTLs are rewritten on a copy of each answer, so the new TTL is never stored.",
+  "language": "go",
+  "context": "needs_context",
+  "provenance": {
+    "repository": "tinfoil-factory/netfoil",
+    "license": "Apache-2.0",
+    "reference": "ea42977900c864b7b1c42f26c5870c86008118a0",
+    "url": "https://github.com/tinfoil-factory/netfoil/commit/ea42977900c864b7b1c42f26c5870c86008118a0",
+    "construction": "reverse of ea42977900: the new side of the diff is the code before the change",
+    "advisory": "GHSA-9ppr-wfw9-xvr2"
+  },
+  "expected": {
+    "risk_level": "MEDIUM",
+    "rationale": "`for _, a := range` copies each element when the slice holds structs, so assigning to a.TTL changes the copy and not the slice. Cached answers are served without their TTL being decremented, so clients keep them too long, and the MaxTTL cap has the same problem. Whether the elements are values or pointers is not visible in the diff. GitHub rated the advisory medium.",
+    "issues": [
+      {
+        "file_path": "internal/dns/dns_proxy.go",
+        "line_start": 79,
+        "line_end": 84,
+        "description": "rewriteTTLs assigns to the range variable, a copy, so the decremented or zeroed TTL is never written back to result.Answers."
+      },
+      {
+        "file_path": "internal/dns/dns_proxy.go",
+        "line_start": 621,
+        "line_end": 623,
+        "description": "The MaxTTL cap is applied to the range variable, a copy, so it never takes effect."
+      }
+    ]
+  },
+  "diff": "diff --git a/internal/dns/dns_proxy.go b/internal/dns/dns_proxy.go\nindex 0ed3a1d..7b14f16 100644\n--- a/internal/dns/dns_proxy.go\n+++ b/internal/dns/dns_proxy.go\n@@ -76,12 +76,12 @@ func (t *timedResponse) rewriteTTLs() (result *Response, stillValid bool) {\n \t\tAnswers:   slices.Clone(t.response.Answers),\n \t}\n \n-\tfor i := range result.Answers {\n-\t\tif result.Answers[i].TTL >= diffSeconds {\n-\t\t\tresult.Answers[i].TTL = result.Answers[i].TTL - diffSeconds\n+\tfor _, a := range result.Answers {\n+\t\tif a.TTL >= diffSeconds {\n+\t\t\ta.TTL = a.TTL - diffSeconds\n \t\t} else {\n \t\t\tok = false\n-\t\t\tresult.Answers[i].TTL = 0\n+\t\t\ta.TTL = 0\n \t\t}\n \t}\n \n@@ -618,9 +618,9 @@ func (w *worker) process(workerTask *workerTask) (processResponse, error) {\n \t\t\t\t// TODO responses without at TTL will not be evicted from the cache, so not caching it for now\n \t\t\t\t// TODO decide what to do with large responses\n \t\t\t\tif len(candidateResponse.Answers) > 0 && len(candidateResponse.Answers) < 1000 {\n-\t\t\t\t\tfor i := range candidateResponse.Answers {\n-\t\t\t\t\t\tif candidateResponse.Answers[i].TTL > w.config.MaxTTL {\n-\t\t\t\t\t\t\tcandidateResponse.Answers[i].TTL = w.config.MaxTTL\n+\t\t\t\t\tfor _, answer := range candidateResponse.Answers {\n+\t\t\t\t\t\tif answer.TTL > w.config.MaxTTL {\n+\t\t\t\t\t\t\tanswer.TTL = w.config.MaxTTL\n \t\t\t\t\t\t}\n \t\t\t\t\t}\n \n"
+}
