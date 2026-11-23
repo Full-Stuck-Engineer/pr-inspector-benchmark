@@ -1,7 +1,15 @@
 """Scoring rules: how a review outcome is judged against a benchmark case."""
 
-from pr_inspector_benchmark.domain.entities import BenchmarkCase, ExpectedIssue
-from pr_inspector_benchmark.domain.results import CaseScore, ReportedIssue, ReviewOutcome
+from collections.abc import Sequence
+
+from pr_inspector_benchmark.domain.entities import BenchmarkCase, ContextNeeded, ExpectedIssue
+from pr_inspector_benchmark.domain.results import (
+    CaseScore,
+    ContextTally,
+    ReportedIssue,
+    ReviewOutcome,
+    ScoreSummary,
+)
 
 
 def _normalize(path: str) -> str:
@@ -37,4 +45,28 @@ def score_case(case: BenchmarkCase, outcome: ReviewOutcome, line_tolerance: int 
         expected_found=tuple(any(row) for row in matches),
         reported_count=len(reports),
         matched_reports=sum(any(row[j] for row in matches) for j in range(len(reports))),
+    )
+
+
+def summarize(scores: Sequence[CaseScore]) -> ScoreSummary:
+    """Pool case scores into the numbers a run is reported by."""
+    tallies: dict[ContextNeeded, tuple[int, int]] = {}
+    for score in scores:
+        if score.is_control:
+            continue
+        found, expected = tallies.get(score.context, (0, 0))
+        tallies[score.context] = (found + score.found_count, expected + len(score.expected_found))
+
+    controls = [score for score in scores if score.is_control]
+    return ScoreSummary(
+        cases=len(scores),
+        risk_exact_cases=sum(score.risk_exact for score in scores),
+        risk_near_cases=sum(score.risk_near for score in scores),
+        expected_issues=sum(len(score.expected_found) for score in scores),
+        found_issues=sum(score.found_count for score in scores),
+        reported_issues=sum(score.reported_count for score in scores),
+        matched_reports=sum(score.matched_reports for score in scores),
+        control_cases=len(controls),
+        controls_with_reports=sum(score.reported_count > 0 for score in controls),
+        by_context={ctx: ContextTally(found, exp) for ctx, (found, exp) in tallies.items()},
     )
