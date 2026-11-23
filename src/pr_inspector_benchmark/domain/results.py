@@ -4,7 +4,8 @@ Scores store raw counts and derive every rate from them. A rate whose denominato
 ``None``, never 0: "no expected issues" must not read as "found none of them".
 """
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 from pr_inspector_benchmark.domain.entities import RISK_ORDER, ContextNeeded, RiskLevel
 
@@ -73,3 +74,56 @@ class CaseScore:
     def false_positives(self) -> int:
         """Reports that match no expected issue; on a control, every report."""
         return self.reported_count - self.matched_reports
+
+
+@dataclass(frozen=True)
+class ContextTally:
+    """Expected issues found, out of those expected, for one context tag."""
+
+    found: int
+    expected: int
+
+    @property
+    def recall(self) -> float | None:
+        return _ratio(self.found, self.expected)
+
+
+@dataclass(frozen=True)
+class ScoreSummary:
+    """Scores pooled over a run. Recall is pooled over issues: "found X of Y"."""
+
+    cases: int
+    risk_exact_cases: int
+    risk_near_cases: int
+    expected_issues: int
+    found_issues: int
+    reported_issues: int
+    matched_reports: int
+    control_cases: int
+    controls_with_reports: int
+    by_context: Mapping[ContextNeeded, ContextTally] = field(default_factory=dict)
+
+    @property
+    def risk_accuracy(self) -> float | None:
+        return _ratio(self.risk_exact_cases, self.cases)
+
+    @property
+    def risk_near_accuracy(self) -> float | None:
+        return _ratio(self.risk_near_cases, self.cases)
+
+    @property
+    def issue_recall(self) -> float | None:
+        return _ratio(self.found_issues, self.expected_issues)
+
+    @property
+    def precision(self) -> float | None:
+        return _ratio(self.matched_reports, self.reported_issues)
+
+    @property
+    def false_positives(self) -> int:
+        return self.reported_issues - self.matched_reports
+
+    @property
+    def control_false_positive_rate(self) -> float | None:
+        """Share of controls where the reviewer reported anything at all."""
+        return _ratio(self.controls_with_reports, self.control_cases)
