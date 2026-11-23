@@ -1,0 +1,47 @@
+[project]
+name = "pr-inspector-benchmark"
+version = "0.1.0"
+description = "Benchmark harness measuring how accurately, how fast and at what cost LLMs review code changes with pr-inspector"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = [
+    "pr-inspector",
+    "typer>=0.15.0",
+]
+
+[project.scripts]
+pr-bench = "pr_inspector_benchmark.interface.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+# Track the Phase 1 branch of pr-inspector; uv.lock pins the exact commit.
+pr-inspector = { git = "https://github.com/Full-Stuck-Engineer/pr-inspector", branch = "phase/01-diff-cli" }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "ruff>=0.9.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
