@@ -6,6 +6,7 @@ from pr_inspector.domain.entities import PRReviewResult as PrResult
 from pr_inspector.domain.entities import ReviewIssue as PrIssue
 from pr_inspector.domain.entities import RiskLevel as PrRisk
 from pr_inspector.domain.exceptions import ReviewExecutionError
+from pydantic import ValidationError
 
 from pr_inspector_benchmark.domain.entities import (
     BenchmarkCase,
@@ -21,6 +22,7 @@ from pr_inspector_benchmark.infrastructure.pr_inspector_reviewer import (
     PrInspectorReviewer,
     ReviewerSettings,
     build_reviewer,
+    is_local_endpoint,
 )
 
 DIFF = """\
@@ -190,3 +192,47 @@ def test_build_reviewer_wires_the_settings_into_pr_inspectors_reviewer():
     assert isinstance(reviewer, ReviewerPort)
     assert reviewer._reviewer.model == "qwen2.5-coder:7b"
     assert reviewer._reviewer.client.timeout == 120.0
+
+
+# --- local or remote ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:11434/v1",
+        "http://127.0.0.1:8000/v1",
+        "http://[::1]:11434/v1",
+        "http://ollama.localhost/v1",
+    ],
+)
+def test_endpoints_on_this_machine_are_local(url: str):
+    assert is_local_endpoint(url) is True
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.openai.com/v1",
+        "http://192.168.1.5:11434/v1",  # another machine on the network is not local
+        "http://localhost.evil.example/v1",  # a name that merely starts with "localhost"
+        "",
+    ],
+)
+def test_every_other_endpoint_is_remote(url: str):
+    assert is_local_endpoint(url) is False
+
+
+def test_a_reply_that_is_not_valid_json_is_a_per_case_failure_with_no_model_text():
+    """Real case: the model wrapped its JSON in a code fence, and the SDK raised this error."""
+    try:
+        PrResult.model_validate_json('```json\n{"summary": "secret model text"}\n```')
+    except ValidationError as exc:
+        error = exc
+    reviewer = PrInspectorReviewer(FakeInner(error))
+
+    with pytest.raises(ReviewFailedError) as caught:
+        reviewer.review(make_case())
+
+    assert str(caught.value) == "the model's reply was not valid review JSON"
+    assert "secret model text" not in str(caught.value)

@@ -164,3 +164,15 @@ def test_case_result_must_hold_a_score_with_telemetry_or_an_error():
         CaseResult(case_id="a")
     with pytest.raises(ValueError, match="either a score with telemetry, or an error"):
         CaseResult(case_id="a", error="x", telemetry=Telemetry("m", 1, 1, 1.0))
+
+
+def test_progress_is_reported_after_each_case_in_order():
+    seen: list[tuple[int, int, str, bool]] = []
+    reviewer = ScriptedReviewer({"a": hit(), "b": ReviewFailedError("timeout"), "c": hit()})
+    use_case = RunBenchmarkUseCase(
+        FakeLoader([make_case("a"), make_case("b"), make_case("c")]), reviewer
+    )
+
+    use_case.execute(on_case=lambda n, total, r: seen.append((n, total, r.case_id, r.succeeded)))
+
+    assert seen == [(1, 3, "a", True), (2, 3, "b", False), (3, 3, "c", True)]

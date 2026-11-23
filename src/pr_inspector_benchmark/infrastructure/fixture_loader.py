@@ -1,5 +1,6 @@
 """Loads benchmark fixtures from JSON files and validates them against their own diff."""
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from pr_inspector.infrastructure.git.diff_extractor import GitCliDiffProvider
@@ -13,6 +14,7 @@ from pr_inspector_benchmark.domain.entities import (
     RiskLevel,
 )
 from pr_inspector_benchmark.domain.exceptions import FixtureLoadError, InvalidFixtureError
+from pr_inspector_benchmark.domain.protocols import FixtureLoader
 
 
 class _Strict(BaseModel):
@@ -149,3 +151,22 @@ class JsonFixtureLoader:
         except (OSError, ValidationError, InvalidFixtureError) as exc:
             raise FixtureLoadError(f"{path.name}: {exc}") from exc
         return case
+
+
+class SubsetFixtureLoader:
+    """Loads only the named fixtures from another loader, to run a few cases quickly."""
+
+    def __init__(self, loader: FixtureLoader, ids: Sequence[str]) -> None:
+        self._loader = loader
+        self._ids = tuple(ids)
+
+    def load_all(self) -> list[BenchmarkCase]:
+        cases = self._loader.load_all()
+        known = {case.id for case in cases}
+        unknown = [fixture_id for fixture_id in self._ids if fixture_id not in known]
+        if unknown:
+            raise FixtureLoadError(
+                f"unknown fixture id(s): {', '.join(unknown)} "
+                f"(available: {', '.join(sorted(known))})"
+            )
+        return [case for case in cases if case.id in self._ids]
