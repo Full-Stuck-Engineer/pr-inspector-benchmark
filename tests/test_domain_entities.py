@@ -144,3 +144,22 @@ def test_ordinary_text_that_merely_contains_todo_is_fine():
 
 def test_todo_must_be_written_as_the_marker_to_count():
     assert make_case(rationale="TODOs in the parser are ignored").id
+
+
+def test_an_expected_issue_without_extra_windows_has_just_its_main_window():
+    issue = make_issue(line_start=11, line_end=12)
+
+    assert issue.extra_windows == ()
+    assert issue.windows == ((11, 12),)
+
+
+def test_extra_windows_follow_the_main_window():
+    issue = make_issue(line_start=11, line_end=12, extra_windows=((40, 41), (70, 70)))
+
+    assert issue.windows == ((11, 12), (40, 41), (70, 70))
+
+
+@pytest.mark.parametrize("bad", [(0, 3), (9, 2), (-1, 5)])
+def test_an_invalid_extra_window_is_rejected_like_the_main_one(bad: tuple[int, int]):
+    with pytest.raises(InvalidFixtureError, match="line window"):
+        make_issue(extra_windows=((40, 41), bad))

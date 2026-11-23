@@ -18,10 +18,10 @@ def _normalize(path: str) -> str:
 
 
 def _matches(expected: ExpectedIssue, reported: ReportedIssue, tolerance: int) -> bool:
-    """Same file, and the reported line inside the expected window widened by ``tolerance``."""
-    return (
-        _normalize(reported.file_path) == _normalize(expected.file_path)
-        and expected.line_start - tolerance <= reported.line_number <= expected.line_end + tolerance
+    """Same file, and the reported line inside any expected window widened by ``tolerance``."""
+    return _normalize(reported.file_path) == _normalize(expected.file_path) and any(
+        start - tolerance <= reported.line_number <= end + tolerance
+        for start, end in expected.windows
     )
 
 
