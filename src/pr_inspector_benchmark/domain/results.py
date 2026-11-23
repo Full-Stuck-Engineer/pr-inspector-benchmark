@@ -127,3 +127,70 @@ class ScoreSummary:
     def control_false_positive_rate(self) -> float | None:
         """Share of controls where the reviewer reported anything at all."""
         return _ratio(self.controls_with_reports, self.control_cases)
+
+
+@dataclass(frozen=True)
+class Telemetry:
+    """Cost and latency of one review."""
+
+    model: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: float
+
+
+@dataclass(frozen=True)
+class CaseResult:
+    """The result for one case: a score with its telemetry, or the reason the review failed."""
+
+    case_id: str
+    score: CaseScore | None = None
+    telemetry: Telemetry | None = None
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        scored = self.score is not None and self.telemetry is not None
+        failed = self.error is not None and self.score is None and self.telemetry is None
+        if scored == failed:  # neither shape, since both at once is impossible
+            raise ValueError("a case result holds either a score with telemetry, or an error")
+
+    @property
+    def succeeded(self) -> bool:
+        return self.error is None
+
+
+@dataclass(frozen=True)
+class RunResult:
+    """Every case of a run, plus the summary over the cases that could be scored.
+
+    Failed cases are left out of the summary and counted separately, so a rate is never
+    silently computed over fewer cases than the run had. The tokens of a failed review are
+    unknown, so the token totals cover successful reviews only.
+    """
+
+    cases: tuple[CaseResult, ...]
+    summary: ScoreSummary
+
+    @property
+    def failed(self) -> tuple[CaseResult, ...]:
+        return tuple(case for case in self.cases if not case.succeeded)
+
+    def _telemetry(self) -> list[Telemetry]:
+        return [case.telemetry for case in self.cases if case.telemetry is not None]
+
+    @property
+    def total_input_tokens(self) -> int:
+        return sum(t.input_tokens for t in self._telemetry())
+
+    @property
+    def total_output_tokens(self) -> int:
+        return sum(t.output_tokens for t in self._telemetry())
+
+    @property
+    def total_latency_ms(self) -> float:
+        return sum(t.latency_ms for t in self._telemetry())
+
+    @property
+    def mean_latency_ms(self) -> float | None:
+        telemetry = self._telemetry()
+        return self.total_latency_ms / len(telemetry) if telemetry else None
