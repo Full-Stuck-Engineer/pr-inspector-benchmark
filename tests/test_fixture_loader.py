@@ -8,7 +8,9 @@ import pytest
 from pr_inspector_benchmark.domain.entities import ContextNeeded, RiskLevel
 from pr_inspector_benchmark.domain.exceptions import FixtureLoadError
 from pr_inspector_benchmark.domain.protocols import FixtureLoader
-from pr_inspector_benchmark.infrastructure.fixture_loader import JsonFixtureLoader
+from pr_inspector_benchmark.infrastructure.fixture_loader import (
+    JsonFixtureLoader,
+)
 
 # New-side lines: 10 (context), 11 and 12 (added), 13 (context).
 DIFF = """\
@@ -193,3 +195,65 @@ def test_duplicate_ids_across_files_are_rejected(tmp_path: Path):
 
     assert "duplicate id" in message
     assert "a.json" in message
+
+
+# --- the same defect at several places -----------------------------------------------------
+
+# New-side lines: 10-13 and 41-44 (added: 11, 12, 42, 43).
+TWO_PLACES_DIFF = """\
+diff --git a/app/db.py b/app/db.py
+index 1111111..2222222 100644
+--- a/app/db.py
++++ b/app/db.py
+@@ -10,3 +10,4 @@ def find(user):
+     cursor = connect()
+-    cursor.execute("SELECT * FROM users WHERE id = %s", (user,))
++    query = "SELECT * FROM users WHERE id = '" + user + "'"
++    cursor.execute(query)
+     return cursor.fetchall()
+@@ -40,3 +41,4 @@ def remove(user):
+     cursor = connect()
+-    cursor.execute("DELETE FROM users WHERE id = %s", (user,))
++    query = "DELETE FROM users WHERE id = '" + user + "'"
++    cursor.execute(query)
+     return cursor.rowcount
+"""
+
+
+def fixture_with_extra_windows(windows: list) -> dict:
+    fixture = make_fixture(diff=TWO_PLACES_DIFF)
+    fixture["expected"]["issues"][0]["extra_windows"] = windows
+    return fixture
+
+
+def test_extra_windows_are_loaded_into_the_expected_issue(tmp_path: Path):
+    write(tmp_path, "two.json", fixture_with_extra_windows([[42, 43]]))
+
+    (case,) = JsonFixtureLoader(tmp_path).load_all()
+
+    assert case.expected_issues[0].extra_windows == ((42, 43),)
+    assert case.expected_issues[0].windows == ((11, 12), (42, 43))
+
+
+def test_a_fixture_without_extra_windows_loads_as_before(tmp_path: Path):
+    write(tmp_path, "one.json", make_fixture())
+
+    (case,) = JsonFixtureLoader(tmp_path).load_all()
+
+    assert case.expected_issues[0].extra_windows == ()
+
+
+def test_an_extra_window_outside_the_diff_is_rejected(tmp_path: Path):
+    write(tmp_path, "far.json", fixture_with_extra_windows([[90, 95]]))
+
+    message = load_error(tmp_path)
+
+    assert message.startswith("far.json:")
+    assert "90-95" in message
+    assert "does not overlap any new-side line" in message
+
+
+def test_a_malformed_extra_window_is_rejected(tmp_path: Path):
+    write(tmp_path, "bad.json", fixture_with_extra_windows([[43, 42]]))
+
+    assert "line window" in load_error(tmp_path)

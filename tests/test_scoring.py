@@ -1,5 +1,7 @@
 """Tests for the scoring rules and the run summary."""
 
+from dataclasses import replace
+
 import pytest
 
 from pr_inspector_benchmark.domain.entities import (
@@ -241,3 +243,43 @@ def test_summary_breaks_recall_down_by_context_and_leaves_controls_out():
         by_context[ContextNeeded.NEEDS_CONTEXT].found,
         by_context[ContextNeeded.NEEDS_CONTEXT].expected,
     ) == (1, 2)
+
+
+# --- the same defect at several places -----------------------------------------------------
+
+
+def repeated_defect_case() -> BenchmarkCase:
+    """One expected issue with the same defect at three places in the file."""
+    base = make_case((10, 12))
+    issue = ExpectedIssue(PATH, 10, 12, "same bug", extra_windows=((40, 41), (70, 70)))
+    return replace(base, expected_issues=(issue,))
+
+
+@pytest.mark.parametrize("line", [11, 40, 41, 70])
+def test_a_report_at_any_window_finds_the_issue_without_a_false_positive(line: int):
+    score = score_case(repeated_defect_case(), outcome(reported(line)))
+
+    assert score.expected_found == (True,)
+    assert score.false_positives == 0
+
+
+def test_reports_at_several_windows_count_as_one_finding_not_several():
+    score = score_case(repeated_defect_case(), outcome(reported(11), reported(40), reported(70)))
+
+    assert score.expected_found == (True,)
+    assert score.recall == 1.0
+    assert (score.reported_count, score.matched_reports) == (3, 3)
+
+
+def test_a_report_between_the_windows_is_still_a_false_positive():
+    score = score_case(repeated_defect_case(), outcome(reported(55)))
+
+    assert score.expected_found == (False,)
+    assert score.false_positives == 1
+
+
+def test_tolerance_widens_the_extra_windows_too():
+    case = repeated_defect_case()
+
+    assert score_case(case, outcome(reported(39)), line_tolerance=1).expected_found == (True,)
+    assert score_case(case, outcome(reported(39))).expected_found == (False,)

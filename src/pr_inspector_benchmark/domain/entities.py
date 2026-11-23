@@ -71,21 +71,32 @@ class Provenance:
 
 @dataclass(frozen=True)
 class ExpectedIssue:
-    """A finding a good review should report, as a file and a window of new-side lines."""
+    """A finding a good review should report, as a file and a window of new-side lines.
+
+    ``extra_windows`` list further windows in the same file where the same defect occurs, so a
+    report at any of them finds this issue instead of being scored as a false positive.
+    """
 
     file_path: str
     line_start: int
     line_end: int
     description: str
+    extra_windows: tuple[tuple[int, int], ...] = ()
 
     def __post_init__(self) -> None:
         _require_text(self.file_path, "expected issue file_path")
         _require_text(self.description, "expected issue description")
-        if not 1 <= self.line_start <= self.line_end:
-            raise InvalidFixtureError(
-                f"expected issue line window {self.line_start}-{self.line_end} is invalid: "
-                "it needs 1 <= start <= end"
-            )
+        for start, end in self.windows:
+            if not 1 <= start <= end:
+                raise InvalidFixtureError(
+                    f"expected issue line window {start}-{end} is invalid: "
+                    "it needs 1 <= start <= end"
+                )
+
+    @property
+    def windows(self) -> tuple[tuple[int, int], ...]:
+        """Every window of the issue, the main one first."""
+        return ((self.line_start, self.line_end), *self.extra_windows)
 
 
 @dataclass(frozen=True)

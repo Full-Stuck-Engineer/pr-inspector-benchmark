@@ -26,6 +26,7 @@ class _IssueFile(_Strict):
     line_start: int
     line_end: int
     description: str
+    extra_windows: list[tuple[int, int]] = Field(default_factory=list)
 
 
 class _ProvenanceFile(_Strict):
@@ -58,6 +59,16 @@ class _FixtureFile(_Strict):
 _DIFF_PARSER = GitCliDiffProvider()
 
 
+def _to_issue(issue: _IssueFile) -> ExpectedIssue:
+    return ExpectedIssue(
+        file_path=issue.file_path,
+        line_start=issue.line_start,
+        line_end=issue.line_end,
+        description=issue.description,
+        extra_windows=tuple(issue.extra_windows),
+    )
+
+
 def _to_case(fixture: _FixtureFile) -> BenchmarkCase:
     return BenchmarkCase(
         id=fixture.id,
@@ -68,7 +79,7 @@ def _to_case(fixture: _FixtureFile) -> BenchmarkCase:
         diff=fixture.diff,
         expected_risk=fixture.expected.risk_level,
         rationale=fixture.expected.rationale,
-        expected_issues=tuple(ExpectedIssue(**i.model_dump()) for i in fixture.expected.issues),
+        expected_issues=tuple(_to_issue(issue) for issue in fixture.expected.issues),
     )
 
 
@@ -100,11 +111,12 @@ def _check_issue_locations(case: BenchmarkCase) -> None:
                 f"expected issue file {issue.file_path!r} is not in the diff "
                 f"(files in the diff: {sorted(available)})"
             )
-        if numbers.isdisjoint(range(issue.line_start, issue.line_end + 1)):
-            raise InvalidFixtureError(
-                f"expected issue window {issue.line_start}-{issue.line_end} in "
-                f"{issue.file_path!r} does not overlap any new-side line of the diff"
-            )
+        for start, end in issue.windows:
+            if numbers.isdisjoint(range(start, end + 1)):
+                raise InvalidFixtureError(
+                    f"expected issue window {start}-{end} in {issue.file_path!r} "
+                    "does not overlap any new-side line of the diff"
+                )
 
 
 class JsonFixtureLoader:
