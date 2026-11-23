@@ -8,6 +8,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "pr-inspector",
+    "pydantic>=2.10.0",
     "typer>=0.15.0",
 ]
 
