@@ -264,3 +264,19 @@ def test_a_remote_run_saves_both_the_reported_and_the_estimated_counts(setup):
     assert record.totals.input_tokens == 2000  # the fake reviewer reports 1,000 per fixture
     assert record.totals.input_tokens_estimated == 2 * estimate_input_tokens(DIFF)
     assert record.totals.input_tokens_billed == record.totals.input_tokens_estimated
+
+
+def test_the_compare_command_refuses_a_single_price(setup):
+    invoke, _, results = setup
+    invoke("--label", "local-qwen", "--model", "qwen", "--base-url", LOCAL)
+
+    from typer.testing import CliRunner
+
+    from pr_inspector_benchmark.interface.cli import app as cli_app
+
+    result = CliRunner().invoke(
+        cli_app, ["compare", str(results / "local-qwen.json"), "--price-in", "1"]
+    )
+
+    assert result.exit_code == 2
+    assert "both --price-in and --price-out" in result.output
