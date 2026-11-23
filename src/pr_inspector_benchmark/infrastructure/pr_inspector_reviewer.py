@@ -5,11 +5,13 @@ pr-inspector's types stop at this module: the domain only sees its own outcome a
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from pr_inspector.domain.exceptions import ReviewExecutionError
 from pr_inspector.domain.protocols import LLMReviewer
 from pr_inspector.infrastructure.git.diff_extractor import GitCliDiffProvider
 from pr_inspector.infrastructure.llm.openai_client import OpenAICompatibleLLMReviewer
+from pydantic import ValidationError
 
 from pr_inspector_benchmark.domain.entities import BenchmarkCase, RiskLevel
 from pr_inspector_benchmark.domain.exceptions import ConfigurationError, ReviewFailedError
@@ -35,6 +37,12 @@ class PrInspectorReviewer:
         except ReviewExecutionError as exc:
             # `from None`: the chained traceback would carry the unredacted message.
             raise ReviewFailedError(self._redact(str(exc))) from None
+        except ValidationError:
+            # The model's reply did not match the schema, for example JSON inside a code fence.
+            # The SDK raises this itself, outside pr-inspector's handling, and it must be a
+            # per-case failure rather than the end of the whole run. The message is generic so
+            # no part of the model's reply is copied into the results.
+            raise ReviewFailedError("the model's reply was not valid review JSON") from None
 
         outcome = ReviewOutcome(
             risk_level=RiskLevel(result.risk_level.value),
@@ -102,6 +110,12 @@ def _parse_timeout(raw: str | None) -> float:
     if timeout <= 0:
         raise ConfigurationError(f"PR_BENCH_TIMEOUT must be a positive number of seconds: {raw!r}")
     return timeout
+
+
+def is_local_endpoint(base_url: str) -> bool:
+    """Whether an endpoint runs on this machine, so it needs no key and costs nothing."""
+    host = urlparse(base_url).hostname or ""
+    return host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".localhost")
 
 
 def build_reviewer(settings: ReviewerSettings) -> PrInspectorReviewer:

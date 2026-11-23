@@ -10,6 +10,7 @@ from pr_inspector_benchmark.domain.exceptions import FixtureLoadError
 from pr_inspector_benchmark.domain.protocols import FixtureLoader
 from pr_inspector_benchmark.infrastructure.fixture_loader import (
     JsonFixtureLoader,
+    SubsetFixtureLoader,
 )
 
 # New-side lines: 10 (context), 11 and 12 (added), 13 (context).
@@ -257,3 +258,32 @@ def test_a_malformed_extra_window_is_rejected(tmp_path: Path):
     write(tmp_path, "bad.json", fixture_with_extra_windows([[43, 42]]))
 
     assert "line window" in load_error(tmp_path)
+
+
+# --- running a subset ---------------------------------------------------------------------
+
+
+def write_three(directory: Path) -> JsonFixtureLoader:
+    for fixture_id in ("a-one", "b-two", "c-three"):
+        write(directory, f"{fixture_id}.json", make_fixture(id=fixture_id))
+    return JsonFixtureLoader(directory)
+
+
+def test_the_subset_loader_returns_only_the_named_fixtures_in_fixture_order(tmp_path: Path):
+    loader = SubsetFixtureLoader(write_three(tmp_path), ["c-three", "a-one"])
+
+    assert [case.id for case in loader.load_all()] == ["a-one", "c-three"]
+
+
+def test_the_subset_loader_satisfies_the_domain_port(tmp_path: Path):
+    assert isinstance(SubsetFixtureLoader(write_three(tmp_path), ["a-one"]), FixtureLoader)
+
+
+def test_an_unknown_id_is_an_error_that_lists_what_is_available(tmp_path: Path):
+    loader = SubsetFixtureLoader(write_three(tmp_path), ["a-one", "nope"])
+
+    with pytest.raises(FixtureLoadError) as caught:
+        loader.load_all()
+
+    assert "nope" in str(caught.value)
+    assert "a-one, b-two, c-three" in str(caught.value)

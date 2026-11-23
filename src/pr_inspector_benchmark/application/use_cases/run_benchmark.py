@@ -1,5 +1,7 @@
 """Run every fixture through a reviewer and score the outcomes."""
 
+from collections.abc import Callable
+
 from pr_inspector_benchmark.domain.entities import BenchmarkCase
 from pr_inspector_benchmark.domain.exceptions import ReviewFailedError
 from pr_inspector_benchmark.domain.protocols import FixtureLoader, ReviewerPort
@@ -27,9 +29,20 @@ class RunBenchmarkUseCase:
         self._reviewer = reviewer
         self._line_tolerance = line_tolerance
 
-    def execute(self) -> RunResult:
-        """Review every case in fixture order."""
-        results = tuple(self._run_case(case) for case in self._loader.load_all())
+    def execute(self, on_case: Callable[[int, int, CaseResult], None] | None = None) -> RunResult:
+        """Review every case in fixture order.
+
+        ``on_case(position, total, result)`` is called after each case, so a long run can
+        report its progress while it goes on.
+        """
+        cases = self._loader.load_all()
+        results = []
+        for position, case in enumerate(cases, start=1):
+            result = self._run_case(case)
+            results.append(result)
+            if on_case is not None:
+                on_case(position, len(cases), result)
+        results = tuple(results)
         scores = [result.score for result in results if result.score is not None]
         return RunResult(cases=results, summary=summarize(scores))
 
