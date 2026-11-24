@@ -36,6 +36,11 @@ from pr_inspector_benchmark.infrastructure.run_store import RunStoreError, read_
 from pr_inspector_benchmark.infrastructure.token_estimate import estimate_input_tokens
 from pr_inspector_benchmark.interface.comparison import build_comparison, to_markdown, to_rich
 from pr_inspector_benchmark.interface.formatting import case_line, run_summary
+from pr_inspector_benchmark.interface.prompt_report import (
+    ManifestError,
+    load_manifest,
+    prompt_sections,
+)
 
 app = typer.Typer(
     name="pr-bench",
@@ -259,8 +264,17 @@ def compare(
         float | None,
         typer.Option(min=0, help="Reprice every run: USD per million output tokens."),
     ] = None,
+    manifest: Annotated[
+        Path | None,
+        typer.Option(
+            help="TOML file with the title, change and verdict of each prompt, by fingerprint. "
+            "Used with --markdown.",
+        ),
+    ] = None,
 ) -> None:
     """Put saved runs side by side."""
+    if manifest is not None and markdown is None:
+        raise _fail("--manifest adds to the Markdown report, so give --markdown too")
     try:
         runs = [read_run(path) for path in files]
     except RunStoreError as exc:
@@ -273,6 +287,12 @@ def compare(
 
     if (price_in is None) != (price_out is None):
         raise _fail("give both --price-in and --price-out, or neither")
+    notes = {}
+    if manifest is not None:
+        try:
+            notes = load_manifest(manifest)
+        except ManifestError as exc:
+            raise _fail(str(exc)) from exc
     comparison = build_comparison(runs, price_in=price_in, price_out=price_out)
     console = Console()
     for table in to_rich(comparison):
@@ -281,5 +301,6 @@ def compare(
         typer.echo(note)
     if markdown is not None:
         markdown.parent.mkdir(parents=True, exist_ok=True)
-        markdown.write_text(to_markdown(comparison), encoding="utf-8")
+        text = to_markdown(comparison) + "\n" + prompt_sections(runs, notes)
+        markdown.write_text(text, encoding="utf-8")
         typer.echo(f"wrote {markdown}")
