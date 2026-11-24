@@ -4,6 +4,8 @@ pr-inspector's types stop at this module: the domain only sees its own outcome a
 """
 
 import hashlib
+import json
+import threading
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -18,10 +20,40 @@ from pydantic import ValidationError
 
 from pr_inspector_benchmark.domain.entities import BenchmarkCase, RiskLevel
 from pr_inspector_benchmark.domain.exceptions import ConfigurationError, ReviewFailedError
-from pr_inspector_benchmark.domain.results import ReportedIssue, ReviewOutcome, Telemetry
+from pr_inspector_benchmark.domain.results import RawReply, ReportedIssue, ReviewOutcome, Telemetry
 
 # pr-inspector's own default is 60 s, below what a local model needs for a large fixture.
 DEFAULT_TIMEOUT_SECONDS = 180.0
+
+# Longest reply kept for a failed case. It bounds the size of a run file.
+REPLY_CHARACTER_LIMIT = 20_000
+
+# The last HTTP reply seen by the current thread. The SDK sends and receives in the same
+# thread, so the hook below records the reply belonging to the review running in that thread.
+_capture = threading.local()
+
+
+def _record_reply(response) -> None:
+    """httpx response hook: keep the status, finish reason and text of the latest reply."""
+    response.read()
+    try:
+        choice = json.loads(response.content)["choices"][0]
+        _capture.reply = {
+            "status": response.status_code,
+            "finish_reason": choice.get("finish_reason"),
+            "content": (choice["message"].get("content") or "")[:REPLY_CHARACTER_LIMIT],
+        }
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        _capture.reply = {
+            "status": response.status_code,
+            "note": "reply was not in chat-completion format",
+            "content": response.text[:REPLY_CHARACTER_LIMIT],
+        }
+
+
+def _install_reply_capture(inner: OpenAICompatibleLLMReviewer) -> None:
+    """Hook the SDK's HTTP client. ``_client`` is private to the SDK, so a test pins it."""
+    inner.client._client.event_hooks["response"].append(_record_reply)
 
 
 def prompt_fingerprint(text: str) -> str:
@@ -59,17 +91,20 @@ class PrInspectorReviewer:
 
     def review(self, case: BenchmarkCase) -> tuple[ReviewOutcome, Telemetry]:
         file_diffs = self._diff_parser.parse_unified_diff(case.diff)
+        _capture.reply = None
         try:
             result, telemetry = self._reviewer.review(file_diffs)
         except ReviewExecutionError as exc:
             # `from None`: the chained traceback would carry the unredacted message.
-            raise ReviewFailedError(self._redact(str(exc))) from None
+            raise ReviewFailedError(self._redact(str(exc)), raw_reply=self._captured()) from None
         except ValidationError:
             # The model's reply did not match the schema, for example JSON inside a code fence.
             # The SDK raises this itself, outside pr-inspector's handling, and it must be a
-            # per-case failure rather than the end of the whole run. The message is generic so
-            # no part of the model's reply is copied into the results.
-            raise ReviewFailedError("the model's reply was not valid review JSON") from None
+            # per-case failure rather than the end of the whole run. The message is generic;
+            # the reply itself is kept apart, as raw_reply, after redaction.
+            raise ReviewFailedError(
+                "the model's reply was not valid review JSON", raw_reply=self._captured()
+            ) from None
 
         outcome = ReviewOutcome(
             risk_level=RiskLevel(result.risk_level.value),
@@ -95,6 +130,18 @@ class PrInspectorReviewer:
         for secret in self._secrets:
             text = text.replace(secret, "***")
         return text
+
+    def _captured(self) -> RawReply | None:
+        """The reply received for the review that just failed, redacted, if there was one."""
+        reply = getattr(_capture, "reply", None)
+        if reply is None:
+            return None
+        return RawReply(
+            status=reply["status"],
+            finish_reason=reply.get("finish_reason"),
+            content=self._redact(reply.get("content", "")),
+            note=reply.get("note"),
+        )
 
 
 @dataclass(frozen=True)
@@ -153,4 +200,5 @@ def build_reviewer(settings: ReviewerSettings) -> PrInspectorReviewer:
         model=settings.model,
         timeout=settings.timeout,
     )
+    _install_reply_capture(inner)
     return PrInspectorReviewer(inner, secrets=(settings.api_key or "",))

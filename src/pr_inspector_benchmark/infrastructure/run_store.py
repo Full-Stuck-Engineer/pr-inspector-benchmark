@@ -10,11 +10,11 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from pr_inspector_benchmark.domain.results import CaseResult, RunResult
+from pr_inspector_benchmark.domain.results import CaseResult, RawReply, RunResult
 from pr_inspector_benchmark.domain.runs import RunInfo, billed_input_tokens
 
 SCHEMA_VERSION = 3
-# Version 2 files predate prompt fingerprints, and still read fine.
+# Version 2 files predate raw replies and prompt fingerprints, and still read fine.
 SUPPORTED_SCHEMA_VERSIONS = (2, 3)
 
 
@@ -62,11 +62,19 @@ class TotalsRecord(_Strict):
     cost_usd: float | None
 
 
+class RawReplyRecord(_Strict):
+    status: int | None
+    finish_reason: str | None = None
+    content: str = ""
+    note: str | None = None
+
+
 class CaseRecord(_Strict):
     """One fixture: a score with its telemetry, or the reason the review failed."""
 
     id: str
     error: str | None = None
+    raw_reply: RawReplyRecord | None = None
     context: str | None = None
     expected_risk: str | None = None
     predicted_risk: str | None = None
@@ -96,9 +104,24 @@ class RunRecord(_Strict):
     cases: list[CaseRecord]
 
 
+def _raw_reply_record(reply: RawReply | None) -> dict | None:
+    if reply is None:
+        return None
+    return {
+        "status": reply.status,
+        "finish_reason": reply.finish_reason,
+        "content": reply.content,
+        "note": reply.note,
+    }
+
+
 def _case_record(case: CaseResult, estimates: Mapping[str, int] | None) -> dict:
     if case.score is None or case.telemetry is None:
-        return {"id": case.case_id, "error": case.error}
+        return {
+            "id": case.case_id,
+            "error": case.error,
+            "raw_reply": _raw_reply_record(case.raw_reply),
+        }
     score, telemetry = case.score, case.telemetry
     return {
         "id": case.case_id,
