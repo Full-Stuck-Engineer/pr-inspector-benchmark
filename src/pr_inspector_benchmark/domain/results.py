@@ -140,6 +140,19 @@ class Telemetry:
 
 
 @dataclass(frozen=True)
+class RawReply:
+    """The model's reply to a review that failed, kept so the failure can be diagnosed.
+
+    ``note`` says why the reply could not be read as a chat completion, when that is the case.
+    """
+
+    status: int | None
+    finish_reason: str | None
+    content: str
+    note: str | None = None
+
+
+@dataclass(frozen=True)
 class CaseResult:
     """The result for one case: a score with its telemetry, or the reason the review failed."""
 
@@ -147,12 +160,15 @@ class CaseResult:
     score: CaseScore | None = None
     telemetry: Telemetry | None = None
     error: str | None = None
+    raw_reply: RawReply | None = None
 
     def __post_init__(self) -> None:
         scored = self.score is not None and self.telemetry is not None
         failed = self.error is not None and self.score is None and self.telemetry is None
         if scored == failed:  # neither shape, since both at once is impossible
             raise ValueError("a case result holds either a score with telemetry, or an error")
+        if self.raw_reply is not None and not failed:
+            raise ValueError("only a failed case can hold a raw reply")
 
     @property
     def succeeded(self) -> bool:

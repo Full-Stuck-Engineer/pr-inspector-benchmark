@@ -50,6 +50,10 @@ class RunBenchmarkUseCase:
         try:
             outcome, telemetry = self._reviewer.review(case)
         except ReviewFailedError as exc:
-            return CaseResult(case_id=case.id, error=str(exc) or type(exc).__name__)
+            return CaseResult(
+                case_id=case.id,
+                error=str(exc) or type(exc).__name__,
+                raw_reply=exc.raw_reply,
+            )
         score = score_case(case, outcome, self._line_tolerance)
         return CaseResult(case_id=case.id, score=score, telemetry=telemetry)
