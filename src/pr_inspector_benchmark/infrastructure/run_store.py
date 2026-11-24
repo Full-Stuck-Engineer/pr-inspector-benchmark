@@ -13,7 +13,9 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from pr_inspector_benchmark.domain.results import CaseResult, RunResult
 from pr_inspector_benchmark.domain.runs import RunInfo, billed_input_tokens
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+# Version 2 files predate prompt fingerprints, and still read fine.
+SUPPORTED_SCHEMA_VERSIONS = (2, 3)
 
 
 class RunStoreError(Exception):
@@ -88,6 +90,7 @@ class RunRecord(_Strict):
     line_tolerance: int
     price_in: float | None
     price_out: float | None
+    prompt_sha: str | None = None
     summary: SummaryRecord
     totals: TotalsRecord
     cases: list[CaseRecord]
@@ -142,6 +145,7 @@ def write_run(
         "line_tolerance": info.line_tolerance,
         "price_in": info.price_in,
         "price_out": info.price_out,
+        "prompt_sha": info.prompt_sha,
         "summary": {
             "cases": summary.cases,
             "risk_exact_cases": summary.risk_exact_cases,
@@ -186,9 +190,9 @@ def read_run(path: Path) -> RunRecord:
         record = RunRecord.model_validate_json(path.read_text(encoding="utf-8"))
     except (OSError, ValidationError) as exc:
         raise RunStoreError(f"{path.name}: {exc}") from exc
-    if record.schema_version != SCHEMA_VERSION:
+    if record.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         raise RunStoreError(
             f"{path.name}: schema version {record.schema_version} is not supported "
-            f"(expected {SCHEMA_VERSION})"
+            f"(expected one of {SUPPORTED_SCHEMA_VERSIONS})"
         )
     return record

@@ -27,7 +27,10 @@ from pr_inspector_benchmark.infrastructure.git_change_source import GitChangeSou
 from pr_inspector_benchmark.infrastructure.pr_inspector_reviewer import (
     ReviewerSettings,
     build_reviewer,
+    default_system_prompt,
     is_local_endpoint,
+    prompt_fingerprint,
+    system_prompt,
 )
 from pr_inspector_benchmark.infrastructure.run_store import RunStoreError, read_run, write_run
 from pr_inspector_benchmark.infrastructure.token_estimate import estimate_input_tokens
@@ -72,6 +75,16 @@ def create_change_source() -> GitChangeSource:
 def _fail(message: str) -> typer.Exit:
     typer.echo(f"error: {message}", err=True)
     return typer.Exit(code=2)
+
+
+def _read_prompt(path: Path) -> str:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise _fail(f"cannot read prompt file {path}: {exc.strerror}") from exc
+    if not text.strip():
+        raise _fail(f"prompt file {path} is empty")
+    return text
 
 
 @app.command("build-fixture")
@@ -176,20 +189,31 @@ def run(
     price_out: Annotated[
         float | None, typer.Option(min=0, help="USD per million output tokens.")
     ] = None,
+    prompt_file: Annotated[
+        Path | None,
+        typer.Option(help="Use this file as the system prompt instead of pr-inspector's default."),
+    ] = None,
+    withhold_model: Annotated[
+        bool,
+        typer.Option(help="Save 'withheld' in place of the model name, for published results."),
+    ] = False,
     force: Annotated[bool, typer.Option(help="Overwrite an existing results file.")] = False,
 ) -> None:
     """Review every fixture with one model and save the run."""
     local = is_local_endpoint(base_url)
+    prompt_text = _read_prompt(prompt_file) if prompt_file else default_system_prompt()
+    shown_model = "withheld" if withhold_model else model
     try:
         info = RunInfo(
             label=label,
-            model=model,
+            model=shown_model,
             endpoint="local" if local else "remote",
             started_at=datetime.now(UTC).isoformat(timespec="seconds"),
             line_tolerance=line_tolerance,
             # A local model costs nothing. A remote one with no price given has an unknown cost.
             price_in=0.0 if local and price_in is None else price_in,
             price_out=0.0 if local and price_out is None else price_out,
+            prompt_sha=prompt_fingerprint(prompt_text),
         )
     except ValueError as exc:
         raise _fail(str(exc)) from exc
@@ -205,12 +229,15 @@ def run(
     reviewer = create_reviewer(
         ReviewerSettings(model=model, base_url=base_url, api_key=api_key, timeout=timeout)
     )
-    typer.echo(f"{label}: reviewing with {model} on a {info.endpoint} endpoint")
+    typer.echo(f"{label}: reviewing with {shown_model} on a {info.endpoint} endpoint")
     use_case = RunBenchmarkUseCase(loader, reviewer, line_tolerance=line_tolerance)
     try:
         cases = loader.load_all()
         estimates = {case.id: estimate_input_tokens(case.diff) for case in cases}
-        result = use_case.execute(on_case=lambda n, total, r: typer.echo(case_line(n, total, r)))
+        with system_prompt(prompt_text):
+            result = use_case.execute(
+                on_case=lambda n, total, r: typer.echo(case_line(n, total, r))
+            )
     except FixtureLoadError as exc:
         raise _fail(str(exc)) from exc
 
