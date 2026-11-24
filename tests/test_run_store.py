@@ -176,7 +176,7 @@ def test_the_file_holds_only_whitelisted_top_level_keys_and_no_endpoint(tmp_path
 
     assert set(document) == {
         "schema_version", "label", "model", "endpoint", "started_at", "line_tolerance",
-        "price_in", "price_out", "summary", "totals", "cases",
+        "price_in", "price_out", "prompt_sha", "summary", "totals", "cases",
     }  # fmt: skip
     text = path.read_text(encoding="utf-8").lower()
     for forbidden in ("http", "base_url", "api_key", "secret", "token="):
@@ -244,3 +244,17 @@ def test_a_local_run_is_priced_on_its_reported_count_even_with_estimates(tmp_pat
 def test_a_missing_estimate_for_a_scored_case_is_refused(tmp_path: Path):
     with pytest.raises(ValueError, match="no input token estimate for: c"):
         write_run(tmp_path / "x.json", make_info(), make_result(), {"a": 1, "b": 1})
+
+
+def test_a_version_two_run_file_still_reads(tmp_path: Path):
+    path = tmp_path / "run.json"
+    write_run(path, make_info(), make_result(), ESTIMATES)
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["schema_version"] = 2
+    del document["prompt_sha"]
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    record = read_run(path)
+
+    assert record.schema_version == 2
+    assert record.prompt_sha is None

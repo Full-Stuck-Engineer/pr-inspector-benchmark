@@ -3,10 +3,13 @@
 pr-inspector's types stop at this module: the domain only sees its own outcome and telemetry.
 """
 
-from collections.abc import Mapping, Sequence
+import hashlib
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
+import pr_inspector.infrastructure.llm.openai_client as client_module
 from pr_inspector.domain.exceptions import ReviewExecutionError
 from pr_inspector.domain.protocols import LLMReviewer
 from pr_inspector.infrastructure.git.diff_extractor import GitCliDiffProvider
@@ -19,6 +22,30 @@ from pr_inspector_benchmark.domain.results import ReportedIssue, ReviewOutcome, 
 
 # pr-inspector's own default is 60 s, below what a local model needs for a large fixture.
 DEFAULT_TIMEOUT_SECONDS = 180.0
+
+
+def prompt_fingerprint(text: str) -> str:
+    """The first 10 hex characters of the SHA-256 of a system prompt, as run files store it."""
+    return hashlib.sha256(text.encode()).hexdigest()[:10]
+
+
+def default_system_prompt() -> str:
+    """pr-inspector's own system prompt, as this installation has it."""
+    return client_module.REVIEW_SYSTEM_PROMPT
+
+
+@contextmanager
+def system_prompt(text: str) -> Iterator[None]:
+    """Use ``text`` as pr-inspector's system prompt, then put the previous one back.
+
+    pr-inspector reads its prompt from a module constant at call time, so this is the seam.
+    """
+    original = client_module.REVIEW_SYSTEM_PROMPT
+    client_module.REVIEW_SYSTEM_PROMPT = text
+    try:
+        yield
+    finally:
+        client_module.REVIEW_SYSTEM_PROMPT = original
 
 
 class PrInspectorReviewer:

@@ -1,5 +1,6 @@
 """The settings of a benchmark run, and what it cost."""
 
+import re
 from dataclasses import dataclass
 
 from pr_inspector_benchmark.domain.entities import is_valid_case_id
@@ -22,12 +23,15 @@ class RunInfo:
     line_tolerance: int = 0
     price_in: float | None = None
     price_out: float | None = None
+    prompt_sha: str | None = None  # fingerprint of the system prompt that was used
 
     def __post_init__(self) -> None:
         if not is_valid_case_id(self.label):
             raise ValueError(
                 f"label must be a lowercase slug (letters, digits, '-', '_'): {self.label!r}"
             )
+        if self.prompt_sha is not None and not re.fullmatch(r"[0-9a-f]{10}", self.prompt_sha):
+            raise ValueError("prompt_sha must be 10 lowercase hex characters")
         if not self.model.strip():
             raise ValueError("model must not be blank")
         if self.endpoint not in ENDPOINTS:
