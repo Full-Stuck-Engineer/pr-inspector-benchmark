@@ -264,7 +264,7 @@ wheels = [
 [[package]]
 name = "pr-inspector"
 version = "0.1.0"
-source = { git = "https://github.com/Full-Stuck-Engineer/pr-inspector?branch=phase%2F01-diff-cli#c86266f5e2446e290624532c54f78521a8dce020" }
+source = { git = "https://github.com/Full-Stuck-Engineer/pr-inspector?branch=phase%2F01-diff-cli#44df529aad3553b3be84adb4a0a2a71cf0cc2b76" }
 dependencies = [
     { name = "openai" },
     { name = "pydantic" },
